@@ -10,18 +10,15 @@ The goal of this project is to develop a scalable and interpretable pipeline for
 
 ## Key Features
 
-* Plate-matched normalization using DMSO controls
 * 4-parameter log-logistic (LL.4) dose-response modeling using the `drc` R package
 * Extraction of key pharmacological metrics:
-
   * Fold change at highest dose
   * EC50 and pEC50
   * Hill slope
   * Top and bottom asymptotes
   * Area under the curve (AUC)
   * R² (goodness of fit)
-* Filtering of biologically meaningful responses based on effect size and fit quality
-
+* Filtering of biologically meaningful responses 
 
 ---
 
@@ -29,31 +26,30 @@ The goal of this project is to develop a scalable and interpretable pipeline for
 
 ### 1. Data Input
 
-* Input: FragPipe `combined_protein.xlsx` file containing LFQ intensities
-* Each column corresponds to a treatment or DMSO control sample
+* Input: MaxQuant's `protein.Groups_fdr0.01.xlsx` file containing LFQ intensities
+** Each column corresponds to a treatment or DMSO control sample (144 treatments, 5 doses each, and 48 DMSO samples)
+
 
 ### 2. Column Naming Convention
 
 To enable automated parsing, columns must follow this format:
 
 **Treatment samples:**
-drug_dose_plate# MaxLFQ Intensity
-Example:
-selumetinib_1000_plate3 MaxLFQ Intensity
+LFQ Intensity drugID dose
+Exmaple: 
+LFQ Intensity 16 1 
 
 **DMSO controls:**
-DMSO_rep#_plate# MaxLFQ Intensity
-Example:
-DMSO_1_plate3 MaxLFQ Intensity
+LFQ Intensity DMSO#
+Example: 
+LFQ Intensity DMSO38
 
 ---
 
 ### 3. Data Preprocessing
-
-* Convert LFQ intensities to numeric
+* Map drug of interest to its respective DMSO control for normalization using the Mapping_Sheet
 * Replace zero values with `NA`
-* Remove entries with missing or invalid gene identifiers
-* Deduplicate proteins by retaining rows with the most valid measurements
+* For rows with multiple gene names separated by semicolon, take the first gene name
 
 ---
 
@@ -151,7 +147,7 @@ install.packages(c("drc","readxl","writexl","dplyr","tidyr","ggplot2","pracma"))
 
 ---
 
-## Future Directions
+## Goals
 
 * Extension to time- and cell-cycle-state-resolved datasets
 * Incorporation of machine learning-based curve classification (e.g., decryptE RF model)
