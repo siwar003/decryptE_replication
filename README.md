@@ -4,15 +4,14 @@
 
 This repository contains a reproducible workflow to replicate and extend the dose-response proteomics analysis described in the decryptE framework. The pipeline processes label-free quantification (LFQ) data generated from FragPipe and applies a plate-aware normalization strategy followed by sigmoidal curve fitting to identify drug-induced protein regulation.
 
-The goal of this project is to develop a scalable and interpretable pipeline for analyzing large-scale drug screening datasets across multiple compounds, doses, and experimental plates.
+The goal of this project is to develop a scalable and interpretable pipeline for analyzing large-scale drug screening datasets across multiple doses, time-points, and cell-cycle states.
 
 ---
 
 ## Key Features
 
 * Plate-matched normalization using DMSO controls
-* Automated parsing of treatment and control samples from column names
-* 4-parameter log-logistic (LL.4) dose-response modeling using the `drc` package
+* 4-parameter log-logistic (LL.4) dose-response modeling using the `drc` R package
 * Extraction of key pharmacological metrics:
 
   * Fold change at highest dose
@@ -22,7 +21,7 @@ The goal of this project is to develop a scalable and interpretable pipeline for
   * Area under the curve (AUC)
   * R² (goodness of fit)
 * Filtering of biologically meaningful responses based on effect size and fit quality
-* Scalable to multi-drug, multi-plate datasets
+
 
 ---
 
