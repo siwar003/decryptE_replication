@@ -44,7 +44,7 @@ Pipeline to replicate decryptE dose-response curves from proteomics data using M
 ---
 ## Note 
 - Data also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
-- Scripts contains python equivalent of R script for curve generation, without using drc
+- Scripts contains python equivalent of R script for curve generation, without using drc (still in-progress)
 ---
 ## Short-Term Goals
 * Adapt the current code for FragPipe output
