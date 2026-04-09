@@ -1,6 +1,6 @@
 # decryptE Replication Using R and Python
 ## Overview  
-Pipeline to replicate decryptE dose–response proteomics analysis using MaxQuant and FragPipe LFQ data. Performs plate-aware normalization and 4-parameter log-logistic (LL.4) modeling to identify regulated proteins.
+Pipeline to replicate decryptE dose-response curves from proteomics data using MaxQuant and FragPipe LFQ data. Utilizes 4-parameter log-logistic (LL.4) modeling to identify regulated proteins and generate their dose-response curves.
 
 ---
 
