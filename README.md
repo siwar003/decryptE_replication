@@ -44,10 +44,12 @@ Pipeline to replicate decryptE dose–response proteomics analysis using FragPip
 ---
 ## Note 
 - data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case.
+---
+## Short-Term Goals
+* Adapt the current code for FragPipe output
+* Generate a FragPipe combined_protein file for all 144 drugs
 
 ## Long-Term Goals
-
-* Generate a FragPipe output of all 144 drugs
 * Create a reproducible pipeline that generates dose-response curves using the decryptE algorithm from FragPipe data
 * Incorporate machine learning-based curve classification 
 * Extend to time- and cell-cycle-state-resolved datasets
