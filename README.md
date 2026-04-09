@@ -43,8 +43,9 @@ Pipeline to replicate decryptE dose-response curves from proteomics data using M
 
 ---
 ## Note 
-- Data also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
-- Scripts contains python equivalent of R script for curve generation, without using drc (still in-progress)
+- Data folder contains `proteinGroups_fdr0.01_example.txt` and its corresponding mapping sheet for data for 3 drugs, Zotiraciclib, Methotrexate, and Brigatinib as a test case. 
+- Data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
+- Scripts folder contains python equivalent of R script for curve generation, without using drc (still in-progress)
 ---
 ## Short-Term Goals
 * Adapt the current code for FragPipe output
