@@ -1,13 +1,13 @@
 # decryptE Replication Using R and Python
 ## Overview  
-Pipeline to replicate decryptE dose-response curves from proteomics data using MaxQuant and FragPipe LFQ data. Utilizes 4-parameter log-logistic (LL.4) modeling to identify regulated proteins and generate their dose-response curves.
+Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from proteomics data using MaxQuant and FragPipe LFQ data. Utilizes 4-parameter log-logistic (LL.4) modeling to identify regulated proteins and generate their dose-response curves.
 
 ---
 
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx`  (or `combined_protein.xlsx` from FragPipe)
+- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` from FragPipe)
 - Column format (MaxQuant):  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
@@ -43,7 +43,7 @@ Pipeline to replicate decryptE dose-response curves from proteomics data using M
 
 ---
 ## Note 
-- Data folder contains `proteinGroups_fdr0.01_example.txt` and its corresponding mapping sheet for data for 3 drugs, Zotiraciclib, Methotrexate, and Brigatinib as a test case. 
+- Data folder contains `proteinGroups_fdr0.01_example.txt` and its corresponding `Mapping_Sheet_example.xlsx` containing MaxQuant data for 3 drugs, Zotiraciclib, Methotrexate, and Brigatinib as a test case. 
 - Data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
 - Scripts folder contains python equivalent of R script for curve generation, without using drc (still in-progress)
 ---
