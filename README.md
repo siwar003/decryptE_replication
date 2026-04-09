@@ -40,7 +40,7 @@ Pipeline to replicate decryptE dose–response proteomics analysis using FragPip
 
 ---
 ## Note 
-- /data also contains combined_protein file, which contains a FragPipe run of one drug, selumetinib, as a test case.
+- /data also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case.
 
 ## Long-Term Goals
 
