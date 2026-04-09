@@ -357,40 +357,49 @@ writexl::write_xlsx(list("Summary" = summary_df, "Long_format" = long_df),
                     path = xlsx_path)
 message("  ", xlsx_path)
 
-# ── 11. PDF OF FITTED CURVES (regulated + unregulated that passed fit filters)
+# ── 11. PDF OF CURVES ───────────────────────────────
+# Includes:
+#   - regulated proteins (fail_reason = NA)
+#   - unregulated proteins that only failed the FC cutoff
+# Excludes:
+#   - low-point, flat, bad-EC50, low-R², or fit-failure cases
+ 
 plot_df <- summary_df[
-  summary_df$fit_success == TRUE &
+  !is.na(summary_df$EC50_nM) &
+    !is.na(summary_df$pEC50) &
     !is.na(summary_df$r_squared) &
     summary_df$r_squared >= MIN_R2 &
-    !is.na(summary_df$EC50_nM) &
-    !is.na(summary_df$pEC50),
+    (
+      is.na(summary_df$fail_reason) |
+      grepl("^fold change at max dose =", summary_df$fail_reason)
+    ),
 ]
-
+ 
 message("\nGenerating PDF for ", nrow(plot_df),
         " fitted proteins (regulated + unregulated passing fit filters)...")
-
+ 
 log10_plot_min <- min(log10_doses) - 0.3
 log10_plot_max <- max(log10_doses) + 0.3
 plot_doses_nM  <- 10^seq(log10_plot_min, log10_plot_max, length.out = 500)
-
+ 
 pdf_path_out <- file.path(
   OUTPUT_DIR,
   paste0("dose_response_curves_all_fitted_", safe_name, ".pdf")
 )
 pdf(pdf_path_out, width = 7, height = 5)
-
+ 
 for (i in seq_len(nrow(plot_df))) {
   gene_id <- plot_df$gene[i]
   row_idx <- which(dat$gene == gene_id)[1]
   if (is.na(row_idx)) next
-
+ 
   rel_vals   <- rel_mat[row_idx, ]
   valid_mask <- !is.na(rel_vals) & is.finite(rel_vals)
   if (sum(valid_mask) < MIN_VALID_PTS) next
-
+ 
   dose_fit <- DOSES_NM[valid_mask]
   resp_fit <- rel_vals[valid_mask]
-
+ 
   fit <- tryCatch(
     suppressWarnings(
       drm(resp_fit ~ dose_fit,
@@ -400,43 +409,57 @@ for (i in seq_len(nrow(plot_df))) {
     error = function(e) NULL
   )
   if (is.null(fit)) next
-
+ 
   pred_line <- tryCatch(
     as.numeric(predict(fit, newdata = data.frame(dose_fit = plot_doses_nM))),
     error = function(e) NULL
   )
   if (is.null(pred_line) || anyNA(pred_line)) next
-
+ 
   obs_df  <- data.frame(log10_dose = log10(dose_fit), rel_int = resp_fit)
   line_df <- data.frame(log10_dose = log10(plot_doses_nM), rel_int = pred_line)
-
-  curve_col <- if (plot_df$direction[i] == "up") {
+ 
+  curve_col <- if (identical(plot_df$direction[i], "up")) {
     "#c0392b"
-  } else if (plot_df$direction[i] == "down") {
+  } else if (identical(plot_df$direction[i], "down")) {
     "#2980b9"
   } else {
     "#555555"
   }
-
-  point_col <- if (plot_df$direction[i] == "up") {
+ 
+  point_col <- if (identical(plot_df$direction[i], "up")) {
     "#e74c3c"
-  } else if (plot_df$direction[i] == "down") {
+  } else if (identical(plot_df$direction[i], "down")) {
     "#3498db"
   } else {
     "#777777"
   }
-
+ 
   all_y  <- c(obs_df$rel_int, line_df$rel_int)
-  y_pad  <- diff(range(all_y, na.rm = TRUE)) * 0.15
-  y_lims <- c(min(all_y, na.rm = TRUE) - y_pad,
-              max(all_y, na.rm = TRUE) + y_pad)
-
+  y_rng  <- range(all_y, na.rm = TRUE)
+  y_pad  <- max(diff(y_rng) * 0.15, 0.05)
+  y_lims <- c(y_rng[1] - y_pad, y_rng[2] + y_pad)
+ 
   subtitle <- sprintf(
     "pEC50 = %.2f  |  EC50 = %.1f nM  |  slope = %.2f  |  top = %.2f  |  bottom = %.2f  |  R² = %.3f",
     plot_df$pEC50[i], plot_df$EC50_nM[i], plot_df$slope[i],
     plot_df$top[i], plot_df$bottom[i], plot_df$r_squared[i]
   )
-
+ 
+  direction_label <- ifelse(is.na(plot_df$direction[i]), "unregulated", plot_df$direction[i])
+ 
+  auc_label <- ifelse(
+    is.na(plot_df$AUC[i]),
+    "NA",
+    sprintf("%.3f", plot_df$AUC[i])
+  )
+ 
+  fc_label <- ifelse(
+    is.na(plot_df$fold_change_at_max[i]),
+    "NA",
+    sprintf("%.2f", plot_df$fold_change_at_max[i])
+  )
+ 
   p <- ggplot() +
     geom_line(data = line_df, aes(x = log10_dose, y = rel_int),
               color = curve_col, linewidth = 1.0) +
@@ -446,32 +469,36 @@ for (i in seq_len(nrow(plot_df))) {
                color = "grey55", linewidth = 0.4) +
     geom_vline(xintercept = log10(plot_df$EC50_nM[i]), linetype = "dotted",
                color = curve_col, linewidth = 0.4, alpha = 0.7) +
-    scale_x_continuous(breaks = log10_doses, labels = DOSES_NM,
-                       limits = c(log10_plot_min, log10_plot_max),
-                       name = "Concentration (nM)") +
-    scale_y_continuous(limits = y_lims,
-                       name = "Relative intensity (treatment / mean DMSO)") +
+    scale_x_continuous(
+      breaks = log10_doses,
+      labels = DOSES_NM,
+      limits = c(log10_plot_min, log10_plot_max),
+      name = "Concentration (nM)"
+    ) +
+    scale_y_continuous(
+      limits = y_lims,
+      name = "Relative intensity (treatment / mean DMSO)"
+    ) +
     labs(
       title    = gene_id,
       subtitle = subtitle,
       caption  = sprintf(
-        "Drug: %s (ID: %s, Plate: %d)  |  direction: %s  |  FC at max dose: %.2f  |  AUC: %.3f  |  n = %d pts",
+        "Drug: %s (ID: %s, Plate: %d)  |  direction: %s  |  FC at max dose: %s  |  AUC: %s  |  n = %d pts",
         DRUG_NAME, DRUG_ID, PLATE_NUM,
-        ifelse(is.na(plot_df$direction[i]), "unregulated", plot_df$direction[i]),
-        plot_df$fold_change_at_max[i], plot_df$AUC[i], sum(valid_mask)
+        direction_label, fc_label, auc_label, sum(valid_mask)
       )
     ) +
     theme_bw(base_size = 10) +
     theme(
-      plot.title    = element_text(face = "bold", size = 12),
-      plot.subtitle = element_text(size = 7.5, color = "grey30"),
-      plot.caption  = element_text(size = 7,   color = "grey50"),
+      plot.title       = element_text(face = "bold", size = 12),
+      plot.subtitle    = element_text(size = 7.5, color = "grey30"),
+      plot.caption     = element_text(size = 7, color = "grey50"),
       panel.grid.minor = element_blank()
     )
-
+ 
   print(p)
 }
-
+ 
 dev.off()
 message("  ", pdf_path_out)
 # ── 12. FINAL SUMMARY ─────────────────────────────────────────
