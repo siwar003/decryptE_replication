@@ -7,7 +7,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` from FragPipe)
+- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` generated from FragPipe using raw files from same MassIVE repository for the Jurkat Cell Proteome)
 - Column format (MaxQuant):  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
