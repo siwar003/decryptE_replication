@@ -7,10 +7,13 @@ Pipeline to replicate decryptE dose–response proteomics analysis using FragPip
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx`  (or combined_protein.xlsx from FragPipe)
-- Column format:  
+- MaxQuant `proteinGroups_fdr0.01.xlsx`  (or `combined_protein.xlsx` from FragPipe)
+- Column format (MaxQuant):  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
+- Column format (FragPipe):
+  - Treatment: `drugName_dose(nM) MaxLFQ Intensity`
+  - DMSO: `DMSO# MaxLFQ Intensity`
 
 ### Preprocessing  
 - Map treatments to plate-specific DMSOs (Mapping Sheet)  
