@@ -43,7 +43,8 @@ Pipeline to replicate decryptE dose–response proteomics analysis using MaxQuan
 
 ---
 ## Note 
-- data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case.
+- Data also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
+- Scripts contains python equivalent of R script for curve generation, without using drc
 ---
 ## Short-Term Goals
 * Adapt the current code for FragPipe output
