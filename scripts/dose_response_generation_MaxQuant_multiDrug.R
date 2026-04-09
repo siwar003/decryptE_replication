@@ -26,9 +26,9 @@ suppressPackageStartupMessages({
 # ══════════════════════════════════════════════════════════════
 DRUG_NAME     <- "Vincristine"    # ← change to any drug in the mapping sheet
 
-INPUT_FILE    <- "C:/Users/Siwar/Desktop/decryptE/proteinGroups_fdr0.01.txt"
-MAPPING_FILE  <- "C:/Users/Siwar/Desktop/decryptE/Mapping_Sheet.xlsx"
-OUTPUT_DIR    <- "results_decrypte_like"
+INPUT_FILE    <- "data/proteinGroups_fdr0.01.txt"
+MAPPING_FILE  <- "data/Mapping_Sheet.xlsx"
+OUTPUT_DIR    <- "results"
 
 DOSES_NM      <- c(1, 10, 100, 1000, 10000)   # nM — fixed for all drugs
 DMSO_PER_PLATE <- 6                            # 6 DMSO controls per plate
