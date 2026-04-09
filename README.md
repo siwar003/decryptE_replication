@@ -1,7 +1,4 @@
-# decryptE Replication Using FragPipe and R
-
-# decryptE Replication (FragPipe + R)
-
+# decryptE Replication Using R and Python
 ## Overview  
 Pipeline to replicate decryptE dose–response proteomics analysis using FragPipe LFQ data. Performs plate-aware normalization and 4-parameter log-logistic (LL.4) modeling to identify regulated proteins.
 
