@@ -16,7 +16,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
   - DMSO: `DMSO# MaxLFQ Intensity`
 
 ### Preprocessing  
-- Map treatments to plate-specific DMSOs (Mapping Sheet)  
+- Map treatments to plate-specific DMSOs (using the Mapping Sheet)
 - Replace 0 → NA  
 - Keep first gene if multiple  
 
