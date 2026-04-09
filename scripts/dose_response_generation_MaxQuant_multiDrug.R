@@ -22,7 +22,7 @@ suppressPackageStartupMessages({
 })
 
 # ══════════════════════════════════════════════════════════════
-# ── 1. USER SETTINGS  ← only edit this block ─────────────────
+# ── 1. USER SETTINGS  ─────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════
 DRUG_NAME     <- "Vincristine"    # ← change to any drug in the mapping sheet
 
@@ -76,7 +76,7 @@ message(sprintf("  Drug: %s  |  ID: %s", DRUG_NAME, DRUG_ID))
 
 # ── Extract plate number from the 'sample' column ─────────────
 # Expected format: Plate#_drugName_dose nM  (e.g. "Plate1_Vincristine_100 nM")
-# We grab the digit(s) right after "Plate" (case-insensitive)
+# Grab the digit(s) right after "Plate" (case-insensitive)
 plate_nums <- as.integer(
   regmatches(drug_rows$sample,
              regexpr("(?i)(?<=plate)\\d+", drug_rows$sample, perl = TRUE))
