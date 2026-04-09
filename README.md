@@ -45,7 +45,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
 ## Note 
 - Data folder contains `proteinGroups_fdr0.01_example.txt` and its corresponding `Mapping_Sheet_example.xlsx` containing MaxQuant data for 3 drugs, Zotiraciclib, Methotrexate, and Brigatinib as a test case. 
 - Data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, Selumetinib, as a test case
-- Scripts folder contains python independent implementation of the 4-parameter log-logistic model without relying on external packages (under development)
+- Scripts folder contains python independent implementation of the 4-parameter log-logistic model without relying on external packages
 ---
 ## Short-Term Goals
 * Adapt the current code for FragPipe output
