@@ -357,27 +357,40 @@ writexl::write_xlsx(list("Summary" = summary_df, "Long_format" = long_df),
                     path = xlsx_path)
 message("  ", xlsx_path)
 
-# ── 11. PDF OF REGULATED CURVES ───────────────────────────────
-reg_df <- summary_df[summary_df$regulated == TRUE, ]
-message("\nGenerating PDF for ", nrow(reg_df), " regulated proteins...")
+# ── 11. PDF OF FITTED CURVES (regulated + unregulated that passed fit filters)
+plot_df <- summary_df[
+  summary_df$fit_success == TRUE &
+    !is.na(summary_df$r_squared) &
+    summary_df$r_squared >= MIN_R2 &
+    !is.na(summary_df$EC50_nM) &
+    !is.na(summary_df$pEC50),
+]
+
+message("\nGenerating PDF for ", nrow(plot_df),
+        " fitted proteins (regulated + unregulated passing fit filters)...")
 
 log10_plot_min <- min(log10_doses) - 0.3
 log10_plot_max <- max(log10_doses) + 0.3
 plot_doses_nM  <- 10^seq(log10_plot_min, log10_plot_max, length.out = 500)
 
-pdf_path_out <- file.path(OUTPUT_DIR,
-                          paste0("dose_response_curves_", safe_name, ".pdf"))
+pdf_path_out <- file.path(
+  OUTPUT_DIR,
+  paste0("dose_response_curves_all_fitted_", safe_name, ".pdf")
+)
 pdf(pdf_path_out, width = 7, height = 5)
 
-for (i in seq_len(nrow(reg_df))) {
-  gene_id <- reg_df$gene[i]
+for (i in seq_len(nrow(plot_df))) {
+  gene_id <- plot_df$gene[i]
   row_idx <- which(dat$gene == gene_id)[1]
   if (is.na(row_idx)) next
+
   rel_vals   <- rel_mat[row_idx, ]
   valid_mask <- !is.na(rel_vals) & is.finite(rel_vals)
   if (sum(valid_mask) < MIN_VALID_PTS) next
+
   dose_fit <- DOSES_NM[valid_mask]
   resp_fit <- rel_vals[valid_mask]
+
   fit <- tryCatch(
     suppressWarnings(
       drm(resp_fit ~ dose_fit,
@@ -387,24 +400,43 @@ for (i in seq_len(nrow(reg_df))) {
     error = function(e) NULL
   )
   if (is.null(fit)) next
+
   pred_line <- tryCatch(
     as.numeric(predict(fit, newdata = data.frame(dose_fit = plot_doses_nM))),
     error = function(e) NULL
   )
   if (is.null(pred_line) || anyNA(pred_line)) next
+
   obs_df  <- data.frame(log10_dose = log10(dose_fit), rel_int = resp_fit)
   line_df <- data.frame(log10_dose = log10(plot_doses_nM), rel_int = pred_line)
-  curve_col <- if (reg_df$direction[i] == "up") "#c0392b" else "#2980b9"
-  point_col <- if (reg_df$direction[i] == "up") "#e74c3c" else "#3498db"
+
+  curve_col <- if (plot_df$direction[i] == "up") {
+    "#c0392b"
+  } else if (plot_df$direction[i] == "down") {
+    "#2980b9"
+  } else {
+    "#555555"
+  }
+
+  point_col <- if (plot_df$direction[i] == "up") {
+    "#e74c3c"
+  } else if (plot_df$direction[i] == "down") {
+    "#3498db"
+  } else {
+    "#777777"
+  }
+
   all_y  <- c(obs_df$rel_int, line_df$rel_int)
   y_pad  <- diff(range(all_y, na.rm = TRUE)) * 0.15
   y_lims <- c(min(all_y, na.rm = TRUE) - y_pad,
               max(all_y, na.rm = TRUE) + y_pad)
+
   subtitle <- sprintf(
     "pEC50 = %.2f  |  EC50 = %.1f nM  |  slope = %.2f  |  top = %.2f  |  bottom = %.2f  |  R² = %.3f",
-    reg_df$pEC50[i], reg_df$EC50_nM[i], reg_df$slope[i],
-    reg_df$top[i], reg_df$bottom[i], reg_df$r_squared[i]
+    plot_df$pEC50[i], plot_df$EC50_nM[i], plot_df$slope[i],
+    plot_df$top[i], plot_df$bottom[i], plot_df$r_squared[i]
   )
+
   p <- ggplot() +
     geom_line(data = line_df, aes(x = log10_dose, y = rel_int),
               color = curve_col, linewidth = 1.0) +
@@ -412,7 +444,7 @@ for (i in seq_len(nrow(reg_df))) {
                color = point_col, size = 3, shape = 16) +
     geom_hline(yintercept = 1, linetype = "dashed",
                color = "grey55", linewidth = 0.4) +
-    geom_vline(xintercept = log10(reg_df$EC50_nM[i]), linetype = "dotted",
+    geom_vline(xintercept = log10(plot_df$EC50_nM[i]), linetype = "dotted",
                color = curve_col, linewidth = 0.4, alpha = 0.7) +
     scale_x_continuous(breaks = log10_doses, labels = DOSES_NM,
                        limits = c(log10_plot_min, log10_plot_max),
@@ -424,8 +456,10 @@ for (i in seq_len(nrow(reg_df))) {
       subtitle = subtitle,
       caption  = sprintf(
         "Drug: %s (ID: %s, Plate: %d)  |  direction: %s  |  FC at max dose: %.2f  |  AUC: %.3f  |  n = %d pts",
-        DRUG_NAME, DRUG_ID, PLATE_NUM, reg_df$direction[i],
-        reg_df$fold_change_at_max[i], reg_df$AUC[i], sum(valid_mask))
+        DRUG_NAME, DRUG_ID, PLATE_NUM,
+        ifelse(is.na(plot_df$direction[i]), "unregulated", plot_df$direction[i]),
+        plot_df$fold_change_at_max[i], plot_df$AUC[i], sum(valid_mask)
+      )
     ) +
     theme_bw(base_size = 10) +
     theme(
@@ -434,12 +468,12 @@ for (i in seq_len(nrow(reg_df))) {
       plot.caption  = element_text(size = 7,   color = "grey50"),
       panel.grid.minor = element_blank()
     )
+
   print(p)
 }
 
 dev.off()
 message("  ", pdf_path_out)
-
 # ── 12. FINAL SUMMARY ─────────────────────────────────────────
 message("\n========================================")
 message("decryptE-like MaxQuant analysis complete")
