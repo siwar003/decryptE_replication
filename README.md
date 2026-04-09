@@ -7,7 +7,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` generated from FragPipe using raw files from same MassIVE repository for the Jurkat Cell Proteome)
+- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` generated from FragPipe using raw files from the MassIVE repository for the drug Selumetinib)
 - Column format (MaxQuant):  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
@@ -44,7 +44,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
 ---
 ## Note 
 - Data folder contains `proteinGroups_fdr0.01_example.txt` and its corresponding `Mapping_Sheet_example.xlsx` containing MaxQuant data for 3 drugs, Zotiraciclib, Methotrexate, and Brigatinib as a test case. 
-- Data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, selumetinib, as a test case
+- Data folder also contains `combined_protein.xlsx` file, which contains a FragPipe run of one drug, Selumetinib, as a test case
 - Scripts folder contains python equivalent of R script for curve generation, without using drc (still in-progress)
 ---
 ## Short-Term Goals
