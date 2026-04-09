@@ -7,7 +7,7 @@ Pipeline to replicate decryptE dose–response proteomics analysis using FragPip
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx`  
+- MaxQuant `proteinGroups_fdr0.01.xlsx`  (or combined_protein.xlsx from FragPipe)
 - Column format:  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
@@ -44,6 +44,7 @@ Pipeline to replicate decryptE dose–response proteomics analysis using FragPip
 
 ## Long-Term Goals
 
+* Generate a FragPipe output of all 144 drugs
 * Create a reproducible pipeline that generates dose-response curves using the decryptE algorithm from FragPipe data
 * Incorporate machine learning-based curve classification 
 * Extend to time- and cell-cycle-state-resolved datasets
