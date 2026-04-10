@@ -24,7 +24,7 @@ suppressPackageStartupMessages({
 # ══════════════════════════════════════════════════════════════
 # ── 1. USER SETTINGS  ─────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════
-DRUG_NAME     <- "Vincristine"    # ← change to any drug in the mapping sheet
+DRUG_NAME     <- "Belinostat"    # ← change to any drug in the mapping sheet
 
 INPUT_FILE    <- "data/proteinGroups_fdr0.01_example.txt"
 MAPPING_FILE  <- "data/Mapping_Sheet.xlsx"
