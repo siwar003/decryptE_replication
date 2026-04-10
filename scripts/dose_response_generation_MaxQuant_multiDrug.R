@@ -56,7 +56,7 @@ if (length(missing_map) > 0) {
        "\n  Found columns: ", paste(colnames(mapping), collapse = ", "))
 }
 
-# Filter to rows matching the requested drug (case-insensitive)
+# ── Extract drug ID from the 'drug' column ────────────────────
 drug_rows <- mapping[tolower(trimws(mapping$drug)) == tolower(trimws(DRUG_NAME)), ]
 
 if (nrow(drug_rows) == 0) {
@@ -65,7 +65,6 @@ if (nrow(drug_rows) == 0) {
        "Available drugs:\n  ", paste(available, collapse = "\n  "))
 }
 
-# ── Extract drug ID ───────────────────────────────────────────
 drug_ids <- unique(drug_rows$id)
 if (length(drug_ids) > 1) {
   warning("Multiple IDs found for '", DRUG_NAME, "': ",
@@ -74,20 +73,43 @@ if (length(drug_ids) > 1) {
 DRUG_ID <- as.character(drug_ids[1])
 message(sprintf("  Drug: %s  |  ID: %s", DRUG_NAME, DRUG_ID))
 
-# ── Extract plate number from the 'sample' column ─────────────
-# Expected format: Plate#_drugName_dose nM  (e.g. "Plate1_Vincristine_100 nM")
-# Grab the digit(s) right after "Plate" (case-insensitive)
+# ── Extract plate number by matching drug name in 'sample' column ─────────
+# Sample format: Plate<N>_<DrugName>_<dose> nM
+# We grep directly on the sample column so special characters in drug names
+# (hyphens, digits, spaces) don't cause mismatch with the 'drug' column.
+
+# Escape any regex metacharacters present in the drug name
+escaped_drug <- gsub("([\\(\\)\\[\\]\\{\\}\\+\\*\\?\\.\\^\\$\\|\\\\])",
+                     "\\\\\\1", DRUG_NAME, perl = TRUE)
+
+# Match rows of the form: Plate<digit(s)>_<DrugName>_<digit>
+drug_sample_rows <- mapping[
+  grepl(paste0("(?i)^plate\\d+_", escaped_drug, "_\\d"),
+        mapping$sample, perl = TRUE), ]
+
+if (nrow(drug_sample_rows) == 0) {
+  stop("Could not find any sample rows matching drug '", DRUG_NAME,
+       "' in the sample column.\n",
+       "  Searched for pattern: Plate<N>_", DRUG_NAME, "_<dose>\n",
+       "  Example sample values in sheet:\n  ",
+       paste(head(mapping$sample, 8), collapse = "\n  "))
+}
+
+# Diagnostic — confirm correct rows are matched
+message("  Matched sample rows (first 5):")
+for (s in head(drug_sample_rows$sample, 5)) message("    ", s)
+
 plate_nums <- as.integer(
-  regmatches(drug_rows$sample,
-             regexpr("(?i)(?<=plate)\\d+", drug_rows$sample, perl = TRUE))
+  regmatches(drug_sample_rows$sample,
+             regexpr("(?i)(?<=plate)\\d+", drug_sample_rows$sample, perl = TRUE))
 )
 plate_nums <- plate_nums[!is.na(plate_nums)]
 
 if (length(plate_nums) == 0) {
-  stop("Could not parse plate number from 'sample' column for drug '", DRUG_NAME,
-       "'.\n  Example sample values found:\n  ",
-       paste(head(drug_rows$sample, 3), collapse = "\n  "),
-       "\n  Expected format: Plate<number>_<drug>_<dose> nM")
+  stop("Could not parse plate number from matched sample rows for drug '",
+       DRUG_NAME, "'.\n",
+       "  Matched sample values:\n  ",
+       paste(head(drug_sample_rows$sample, 5), collapse = "\n  "))
 }
 
 unique_plates <- unique(plate_nums)
@@ -345,8 +367,7 @@ long_df <- data.frame(
 )
 
 # ── 10. WRITE OUTPUTS ─────────────────────────────────────────
-# File names include the drug name so repeated runs don't overwrite each other
-safe_name  <- gsub("[^A-Za-z0-9_]", "_", DRUG_NAME)   # filesystem-safe
+safe_name  <- gsub("[^A-Za-z0-9_]", "_", DRUG_NAME)
 csv_path   <- file.path(OUTPUT_DIR, paste0("summary_", safe_name, ".csv"))
 xlsx_path  <- file.path(OUTPUT_DIR, paste0("summary_", safe_name, ".xlsx"))
 
@@ -357,13 +378,7 @@ writexl::write_xlsx(list("Summary" = summary_df, "Long_format" = long_df),
                     path = xlsx_path)
 message("  ", xlsx_path)
 
-# ── 11. PDF OF CURVES ───────────────────────────────
-# Includes:
-#   - regulated proteins (fail_reason = NA)
-#   - unregulated proteins that only failed the FC cutoff
-# Excludes:
-#   - low-point, flat, bad-EC50, low-R², or fit-failure cases
- 
+# ── 11. PDF OF CURVES THAT PASSED FIT FILTERS ─────────────────
 plot_df <- summary_df[
   !is.na(summary_df$EC50_nM) &
     !is.na(summary_df$pEC50) &
@@ -371,35 +386,35 @@ plot_df <- summary_df[
     summary_df$r_squared >= MIN_R2 &
     (
       is.na(summary_df$fail_reason) |
-      grepl("^fold change at max dose =", summary_df$fail_reason)
+        grepl("^fold change at max dose =", summary_df$fail_reason)
     ),
 ]
- 
+
 message("\nGenerating PDF for ", nrow(plot_df),
         " fitted proteins (regulated + unregulated passing fit filters)...")
- 
+
 log10_plot_min <- min(log10_doses) - 0.3
 log10_plot_max <- max(log10_doses) + 0.3
 plot_doses_nM  <- 10^seq(log10_plot_min, log10_plot_max, length.out = 500)
- 
+
 pdf_path_out <- file.path(
   OUTPUT_DIR,
   paste0("dose_response_curves_all_fitted_", safe_name, ".pdf")
 )
 pdf(pdf_path_out, width = 7, height = 5)
- 
+
 for (i in seq_len(nrow(plot_df))) {
   gene_id <- plot_df$gene[i]
   row_idx <- which(dat$gene == gene_id)[1]
   if (is.na(row_idx)) next
- 
+  
   rel_vals   <- rel_mat[row_idx, ]
   valid_mask <- !is.na(rel_vals) & is.finite(rel_vals)
   if (sum(valid_mask) < MIN_VALID_PTS) next
- 
+  
   dose_fit <- DOSES_NM[valid_mask]
   resp_fit <- rel_vals[valid_mask]
- 
+  
   fit <- tryCatch(
     suppressWarnings(
       drm(resp_fit ~ dose_fit,
@@ -409,16 +424,16 @@ for (i in seq_len(nrow(plot_df))) {
     error = function(e) NULL
   )
   if (is.null(fit)) next
- 
+  
   pred_line <- tryCatch(
     as.numeric(predict(fit, newdata = data.frame(dose_fit = plot_doses_nM))),
     error = function(e) NULL
   )
   if (is.null(pred_line) || anyNA(pred_line)) next
- 
+  
   obs_df  <- data.frame(log10_dose = log10(dose_fit), rel_int = resp_fit)
   line_df <- data.frame(log10_dose = log10(plot_doses_nM), rel_int = pred_line)
- 
+  
   curve_col <- if (identical(plot_df$direction[i], "up")) {
     "#c0392b"
   } else if (identical(plot_df$direction[i], "down")) {
@@ -426,7 +441,7 @@ for (i in seq_len(nrow(plot_df))) {
   } else {
     "#555555"
   }
- 
+  
   point_col <- if (identical(plot_df$direction[i], "up")) {
     "#e74c3c"
   } else if (identical(plot_df$direction[i], "down")) {
@@ -434,32 +449,32 @@ for (i in seq_len(nrow(plot_df))) {
   } else {
     "#777777"
   }
- 
+  
   all_y  <- c(obs_df$rel_int, line_df$rel_int)
   y_rng  <- range(all_y, na.rm = TRUE)
   y_pad  <- max(diff(y_rng) * 0.15, 0.05)
   y_lims <- c(y_rng[1] - y_pad, y_rng[2] + y_pad)
- 
+  
   subtitle <- sprintf(
     "pEC50 = %.2f  |  EC50 = %.1f nM  |  slope = %.2f  |  top = %.2f  |  bottom = %.2f  |  R² = %.3f",
     plot_df$pEC50[i], plot_df$EC50_nM[i], plot_df$slope[i],
     plot_df$top[i], plot_df$bottom[i], plot_df$r_squared[i]
   )
- 
+  
   direction_label <- ifelse(is.na(plot_df$direction[i]), "unregulated", plot_df$direction[i])
- 
+  
   auc_label <- ifelse(
     is.na(plot_df$AUC[i]),
     "NA",
     sprintf("%.3f", plot_df$AUC[i])
   )
- 
+  
   fc_label <- ifelse(
     is.na(plot_df$fold_change_at_max[i]),
     "NA",
     sprintf("%.2f", plot_df$fold_change_at_max[i])
   )
- 
+  
   p <- ggplot() +
     geom_line(data = line_df, aes(x = log10_dose, y = rel_int),
               color = curve_col, linewidth = 1.0) +
@@ -495,12 +510,13 @@ for (i in seq_len(nrow(plot_df))) {
       plot.caption     = element_text(size = 7, color = "grey50"),
       panel.grid.minor = element_blank()
     )
- 
+  
   print(p)
 }
- 
+
 dev.off()
 message("  ", pdf_path_out)
+
 # ── 12. FINAL SUMMARY ─────────────────────────────────────────
 message("\n========================================")
 message("decryptE-like MaxQuant analysis complete")
