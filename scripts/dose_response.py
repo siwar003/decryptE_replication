@@ -128,6 +128,25 @@ def fit_ll4(doses, responses, dose_min_guard, dose_max_guard):
     return params, fitted_vals
 
 
+def compute_auc_trapz_ll4(slope, bottom, top, ec50, log_dose_min, log_dose_max, n_points=200):
+    """
+    Trapezoidal AUC of the fitted curve over log10 dose, normalized by
+    the log10-dose span so the result stays on the response scale.
+    """
+    xs = np.linspace(log_dose_min, log_dose_max, n_points)
+    ys = ll4(10.0 ** xs, slope, bottom, top, ec50)
+
+    if not np.all(np.isfinite(ys)):
+        return np.nan
+
+    auc_raw = trapezoid(ys, xs)
+    x_span = log_dose_max - log_dose_min
+    if not np.isfinite(x_span) or x_span <= 0:
+        return np.nan
+
+    return float(auc_raw / x_span)
+
+
 # ═══════════════════════════════════════════════════════════════
 # ── 3. RESOLVE DRUG METADATA FROM MAPPING SHEET ──────────────
 # ═══════════════════════════════════════════════════════════════
@@ -389,10 +408,12 @@ for i in range(n_prot):
     except Exception:
         pass
 
-    # AUC via trapezoidal integration over fitted curve
-    xs = np.linspace(log10_doses.min(), log10_doses.max(), 200)
-    ys = ll4(10.0 ** xs, slope_val, bottom_val, top_val, ec50_val)
-    out["AUC"] = float(trapezoid(ys, xs))
+    # AUC over log10 dose, normalized by the log-dose span to match
+    # the corrected R implementation and decryptE-style scaling.
+    out["AUC"] = compute_auc_trapz_ll4(
+        slope_val, bottom_val, top_val, ec50_val,
+        log10_doses.min(), log10_doses.max()
+    )
 
     results.append(out)
 
