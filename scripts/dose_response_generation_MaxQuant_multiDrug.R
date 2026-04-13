@@ -216,7 +216,10 @@ compute_auc_trapz <- function(fit_obj, log_dose_min, log_dose_max) {
     xs <- seq(log_dose_min, log_dose_max, length.out = 200)
     ys <- as.numeric(predict(fit_obj,
                              newdata = data.frame(dose_fit = 10^xs)))
-    pracma::trapz(xs, ys)
+    auc_raw <- pracma::trapz(xs, ys)
+    x_span <- log_dose_max - log_dose_min
+    if (!is.finite(x_span) || x_span <= 0) return(NA_real_)
+    auc_raw / x_span
   }, error = function(e) NA_real_)
 }
 
