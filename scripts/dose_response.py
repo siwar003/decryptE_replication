@@ -20,10 +20,10 @@ from matplotlib.backends.backend_pdf import PdfPages
 # ═══════════════════════════════════════════════════════════════
 # ── 1. USER SETTINGS  ← only edit this block ─────────────────
 # ═══════════════════════════════════════════════════════════════
-DRUG_NAME     = "Vincristine"          # ← change to any drug in the mapping sheet
+DRUG_NAME     = "Methotrexate"          # ← change to any drug in the mapping sheet
 
-INPUT_FILE    = "data/proteinGroups_fdr0.01_example.txt"
-MAPPING_FILE  = "data/Mapping_Sheet.xlsx"
+INPUT_FILE    = "data/proteinGroups_fdr0.01.txt"
+MAPPING_FILE  = "data/Mapping_Sheet_example.xlsx"
 OUTPUT_DIR    = "results"
 
 DOSES_NM      = [1, 10, 100, 1000, 10000]   # nM — fixed for all drugs
@@ -72,36 +72,48 @@ def fit_ll4(doses, responses, dose_min_guard, dose_max_guard):
     Fit the LL.4 model to observed dose-response data.
 
     Returns (params_dict, fitted_values) on success, or (None, fail_reason).
+    Uses Levenberg-Marquardt (unconstrained) first — same algorithm as R's
+    drc::drm — then falls back to bounded TRF only if LM fails.
     """
     # Initial guesses
     top0    = responses[np.argmin(doses)]   # response at lowest dose ≈ top
     bottom0 = responses[np.argmax(doses)]   # response at highest dose ≈ bottom
     ec50_0  = np.sqrt(doses.min() * doses.max())  # geometric mean
-    slope0  = 1.0
 
-    # Try multiple initial slope signs
+    # Determine initial slope sign from data trend
+    slope0 = 1.0 if bottom0 < top0 else -1.0
+
     best_fit = None
     best_cost = np.inf
 
-    for s0 in [1.0, -1.0, 0.5, -0.5, 2.0, -2.0]:
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                popt, _ = curve_fit(
-                    ll4, doses, responses,
-                    p0=[s0, bottom0, top0, ec50_0],
-                    bounds=([-50, -10, -10, doses.min() * 0.001],
-                            [ 50,  10,  10, doses.max() * 1000]),
-                    maxfev=10000,
-                    method="trf",
-                )
-            residuals = responses - ll4(doses, *popt)
-            cost = np.sum(residuals ** 2)
-            if cost < best_cost:
-                best_cost = cost
-                best_fit = popt
-        except (RuntimeError, ValueError):
-            continue
+    # Try LM first (fast, unconstrained — matches R's drc), then TRF as fallback
+    for method, s0_list in [("lm", [slope0, -slope0]),
+                            ("trf", [slope0, -slope0])]:
+        if best_fit is not None:
+            break
+        for s0 in s0_list:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    kwargs = dict(
+                        f=ll4, xdata=doses, ydata=responses,
+                        p0=[s0, bottom0, top0, ec50_0],
+                        maxfev=1000,
+                        method=method,
+                    )
+                    if method == "trf":
+                        kwargs["bounds"] = (
+                            [-50, -10, -10, doses.min() * 0.001],
+                            [ 50,  10,  10, doses.max() * 1000],
+                        )
+                    popt, _ = curve_fit(**kwargs)
+                residuals = responses - ll4(doses, *popt)
+                cost = np.sum(residuals ** 2)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_fit = popt
+            except (RuntimeError, ValueError):
+                continue
 
     if best_fit is None:
         return None, "curve_fit error"
@@ -456,20 +468,18 @@ if len(fail_reasons) > 0:
 # ═══════════════════════════════════════════════════════════════
 # ── 9. LONG FORMAT ───────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════
-long_records = []
 genes = dat["gene"].values
-for j, dose in enumerate(DOSES_NM):
-    for i in range(len(genes)):
-        long_records.append({
-            "gene":               genes[i],
-            "drug":               DRUG_NAME,
-            "drug_id":            DRUG_ID,
-            "plate":              PLATE_NUM,
-            "dose_nM":            dose,
-            "log10_dose":         np.log10(dose),
-            "relative_intensity": rel_mat[i, j],
-        })
-long_df = pd.DataFrame(long_records)
+n_genes = len(genes)
+n_doses = len(DOSES_NM)
+long_df = pd.DataFrame({
+    "gene":               np.repeat(genes, n_doses),
+    "drug":               DRUG_NAME,
+    "drug_id":            DRUG_ID,
+    "plate":              PLATE_NUM,
+    "dose_nM":            np.tile(DOSES_NM, n_genes),
+    "log10_dose":         np.tile(log10_doses, n_genes),
+    "relative_intensity": rel_mat.ravel(),
+})
 
 # ═══════════════════════════════════════════════════════════════
 # ── 10. WRITE OUTPUTS ────────────────────────────────────────
@@ -514,6 +524,7 @@ print(f"\nGenerating PDF for {len(plot_df)} fitted proteins "
 log10_plot_min = log10_doses.min() - 0.3
 log10_plot_max = log10_doses.max() + 0.3
 plot_doses_nM  = 10.0 ** np.linspace(log10_plot_min, log10_plot_max, 500)
+log10_plot_doses = np.log10(plot_doses_nM)  # precompute once
 
 pdf_path = os.path.join(OUTPUT_DIR, f"dose_response_curves_all_fitted_{safe_name}.pdf")
 
@@ -551,7 +562,7 @@ with PdfPages(pdf_path) as pdf:
         fig, ax = plt.subplots(figsize=(7, 5))
 
         # Fitted curve
-        ax.plot(np.log10(plot_doses_nM), pred_line,
+        ax.plot(log10_plot_doses, pred_line,
                 color=curve_col, linewidth=1.0)
         # Observed points
         ax.scatter(np.log10(dose_fit), resp_fit,
