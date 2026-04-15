@@ -2,6 +2,8 @@
 Dose-response pipeline (Python port of the R workflow).
 4-parameter log-logistic model (LL.4 / 4PL) implemented directly
 using scipy.optimize.curve_fit — no drc-equivalent package used.
+
+Supports both MaxQuant and FragPipe input formats.
 """
 
 import os
@@ -21,8 +23,14 @@ from matplotlib.backends.backend_pdf import PdfPages
 # ── 1. USER SETTINGS  ← only edit this block ─────────────────
 # ═══════════════════════════════════════════════════════════════
 DRUG_NAME     = "Methotrexate"          # ← change to any drug in the mapping sheet
+INPUT_FORMAT  = "maxquant"              # ← "maxquant" or "fragpipe"
 
+# Input file — choose the one matching your format:
+#   MaxQuant:  tab-separated .txt from proteinGroups
+#   FragPipe:  tab-separated .txt from combined_protein
 INPUT_FILE    = "data/proteinGroups_fdr0.01_example_MaxQuant.txt"
+# INPUT_FILE  = "data/combined_protein_FragPipe_example.txt"
+
 MAPPING_FILE  = "data/Mapping_Sheet_example.xlsx"
 OUTPUT_DIR    = "results"
 
@@ -51,19 +59,19 @@ MIN_EFFECT        = 0.15
 def ll4(x, slope, bottom, top, ec50):
     """Numerically stable 4PL."""
     x = np.asarray(x, dtype=float)
-    
+
     # Prevent division issues
     ec50 = np.maximum(ec50, 1e-12)
-    
+
     # Work in log space to avoid overflow
     log_ratio = np.log(x) - np.log(ec50)
-    
+
     # Clip before exponentiation
     log_term = slope * log_ratio
     log_term = np.clip(log_term, -700, 700)  # avoids exp overflow
-    
+
     term = np.exp(log_term)
-    
+
     return bottom + (top - bottom) / (1.0 + term)
 
 
@@ -162,6 +170,7 @@ def compute_auc_trapz_ll4(slope, bottom, top, ec50, log_dose_min, log_dose_max, 
 # ═══════════════════════════════════════════════════════════════
 # ── 3. RESOLVE DRUG METADATA FROM MAPPING SHEET ──────────────
 # ═══════════════════════════════════════════════════════════════
+print(f"Input format: {INPUT_FORMAT.upper()}")
 print(f"Reading mapping sheet: {MAPPING_FILE}")
 wb = openpyxl.load_workbook(MAPPING_FILE, read_only=True)
 ws = wb.active
@@ -236,15 +245,40 @@ PLATE_NUM = plate_num
 print(f"  Drug: {DRUG_NAME}  |  ID: {DRUG_ID}")
 print(f"  Plate: {PLATE_NUM}")
 
-# ── Compute DMSO column names for this plate ────────────────
-dmso_start = (PLATE_NUM - 1) * DMSO_PER_PLATE + 1
-dmso_end   = PLATE_NUM * DMSO_PER_PLATE
-DMSO_COLS  = [f"LFQ Intensity DMSO{i}" for i in range(dmso_start, dmso_end + 1)]
-print(f"  DMSO columns: LFQ Intensity DMSO{dmso_start} - DMSO{dmso_end}")
+# ═══════════════════════════════════════════════════════════════
+# ── 3b. BUILD COLUMN NAMES (format-dependent) ────────────────
+# ═══════════════════════════════════════════════════════════════
+fmt = INPUT_FORMAT.strip().lower()
 
-# ── Build treatment column names ─────────────────────────────
-TREATMENT_COLS = [f"LFQ Intensity {DRUG_ID} {d}" for d in DOSES_NM]
-print("  Treatment columns:")
+if fmt == "maxquant":
+    # MaxQuant: DMSO columns are numbered sequentially across plates
+    #   Plate 1 → DMSO1-DMSO6, Plate 2 → DMSO7-DMSO12, etc.
+    GENE_COL = "Gene names"
+    dmso_start = (PLATE_NUM - 1) * DMSO_PER_PLATE + 1
+    dmso_end   = PLATE_NUM * DMSO_PER_PLATE
+    DMSO_COLS  = [f"LFQ Intensity DMSO{i}" for i in range(dmso_start, dmso_end + 1)]
+    TREATMENT_COLS = [f"LFQ Intensity {DRUG_ID} {d}" for d in DOSES_NM]
+
+elif fmt == "fragpipe":
+    # FragPipe: DMSO columns use plate_replicate format
+    #   Plate 4 → DMSO_4_1 through DMSO_4_6
+    # Treatment columns use drug name directly (lowercase)
+    #   e.g. methotrexate_10 MaxLFQ Intensity
+    GENE_COL = "Gene"
+    DMSO_COLS = [f"DMSO_{PLATE_NUM}_{r} MaxLFQ Intensity" for r in range(1, DMSO_PER_PLATE + 1)]
+    drug_lower = DRUG_NAME.strip().lower()
+    TREATMENT_COLS = [f"{drug_lower}_{d} MaxLFQ Intensity" for d in DOSES_NM]
+
+else:
+    raise SystemExit(
+        f"Unknown INPUT_FORMAT: '{INPUT_FORMAT}'\n"
+        f"  Set INPUT_FORMAT to 'maxquant' or 'fragpipe'."
+    )
+
+print(f"  DMSO columns:")
+for dc in DMSO_COLS:
+    print(f"    {dc}")
+print(f"  Treatment columns:")
 for tc in TREATMENT_COLS:
     print(f"    {tc}")
 
@@ -252,19 +286,26 @@ for tc in TREATMENT_COLS:
 # ── 4. LOAD DATA ─────────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════
 print(f"\nLoading: {INPUT_FILE}")
-use_cols = ["Gene names"] + DMSO_COLS + TREATMENT_COLS
+use_cols = [GENE_COL] + DMSO_COLS + TREATMENT_COLS
 raw = pd.read_csv(INPUT_FILE, sep="\t", usecols=use_cols, low_memory=False)
 print(f"  Rows: {len(raw)}  Cols: {raw.shape[1]}")
 
+# ═══════════════════════════════════════════════════════════════
 # ── 5. PREPARE GENE COLUMN ──────────────────────────────────
-raw["gene"] = raw["Gene names"].astype(str).str.split(";").str[0].str.strip()
+# ═══════════════════════════════════════════════════════════════
+if fmt == "maxquant":
+    # MaxQuant may have multiple genes per row separated by ";", take the first
+    raw["gene"] = raw[GENE_COL].astype(str).str.split(";").str[0].str.strip()
+elif fmt == "fragpipe":
+    # FragPipe has one gene per row
+    raw["gene"] = raw[GENE_COL].astype(str).str.strip()
 
 # Verify intensity columns exist
 all_intensity_cols = DMSO_COLS + TREATMENT_COLS
 missing_cols = [c for c in all_intensity_cols if c not in raw.columns]
 if missing_cols:
     raise SystemExit(
-        "Missing intensity columns in proteinGroups file:\n"
+        "Missing intensity columns in input file:\n"
         + "\n".join(f"  - {c}" for c in missing_cols)
     )
 
@@ -617,11 +658,13 @@ print(f"  {pdf_path}")
 # ═══════════════════════════════════════════════════════════════
 # ── 12. FINAL SUMMARY ────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════
+format_label = "MaxQuant" if fmt == "maxquant" else "FragPipe"
 print(f"\n========================================")
-print(f"decryptE-like MaxQuant analysis complete")
+print(f"decryptE-like {format_label} analysis complete")
 print(f"========================================")
+print(f"Format  : {format_label}")
 print(f"Drug    : {DRUG_NAME}  (ID: {DRUG_ID})")
-print(f"Plate   : {PLATE_NUM}  (DMSO columns: DMSO{dmso_start}-DMSO{dmso_end})")
+print(f"Plate   : {PLATE_NUM}")
 print(f"Output  : {OUTPUT_DIR}")
 print(f"Files   :")
 print(f"  summary_{safe_name}.csv")
