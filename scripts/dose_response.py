@@ -22,7 +22,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # ═══════════════════════════════════════════════════════════════
 DRUG_NAME     = "Methotrexate"          # ← change to any drug in the mapping sheet
 
-INPUT_FILE    = "data/proteinGroups_fdr0.01.txt"
+INPUT_FILE    = "data/proteinGroups_fdr0.01_example_MaxQuant.txt"
 MAPPING_FILE  = "data/Mapping_Sheet_example.xlsx"
 OUTPUT_DIR    = "results"
 
