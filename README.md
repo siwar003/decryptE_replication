@@ -13,7 +13,7 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
 - Column format (FragPipe):
-  - Treatment: `drugName_dose(nM) MaxLFQ Intensity`
+  - Treatment: `drugName_dose MaxLFQ Intensity`
   - DMSO: `DMSO_Plate#_rep# MaxLFQ Intensity`
 
 ### Preprocessing  
