@@ -26,7 +26,7 @@ suppressPackageStartupMessages({
 # ══════════════════════════════════════════════════════════════
 DRUG_NAME     <- "Belinostat"    # ← change to any drug in the mapping sheet
 
-INPUT_FILE    <- "data/proteinGroups_fdr0.01_example.txt"
+INPUT_FILE    <- "data/proteinGroups_fdr0.01_example_MaxQuant.txt"
 MAPPING_FILE  <- "data/Mapping_Sheet.xlsx"
 OUTPUT_DIR    <- "results"
 
