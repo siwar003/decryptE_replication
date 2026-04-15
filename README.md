@@ -7,13 +7,14 @@ Pipeline to replicate decryptE (Kuster et al, 2024) dose-response curves from pr
 ## Workflow  
 
 ### Input  
-- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` generated from FragPipe using raw files from the MassIVE repository for the drug Selumetinib)
+- MaxQuant `proteinGroups_fdr0.01.xlsx` from decryptE MassIVE repository (MSV000093659) (or `combined_protein.xlsx` generated from FragPipe using raw files from the MassIVE repository)
+- Example files in data include data for drugs Dabrafenib, Methotrexate, and Brigatinib.
 - Column format (MaxQuant):  
   - Treatment: `LFQ Intensity drugID dose`  
   - DMSO: `LFQ Intensity DMSO#`
 - Column format (FragPipe):
   - Treatment: `drugName_dose(nM) MaxLFQ Intensity`
-  - DMSO: `DMSO# MaxLFQ Intensity`
+  - DMSO: `DMSO_Plate#_rep# MaxLFQ Intensity`
 
 ### Preprocessing  
 - Map treatments to plate-specific DMSOs (using the Mapping Sheet)
