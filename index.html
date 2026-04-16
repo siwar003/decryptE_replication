@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Protein Dose-Response Curve Generator</title>
+<!-- Chart.js + annotation plugin -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<!-- SheetJS for XLSX parsing -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+/* ── Reset & base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:        #f4f5f7;
+  --surface:   #ffffff;
+  --border:    #e1e4e8;
+  --border2:   #d0d4da;
+  --text:      #1a1d23;
+  --text2:     #5a6272;
+  --text3:     #9aa0ad;
+  --accent:    #2563eb;
+  --accent-h:  #1d4ed8;
+  --up:        #dc2626;
+  --up-light:  #fee2e2;
+  --down:      #2563eb;
+  --down-light:#dbeafe;
+  --none-c:    #6b7280;
+  --none-light:#f3f4f6;
+  --success:   #16a34a;
+  --warn:      #d97706;
+  --error:     #dc2626;
+  --radius:    8px;
+  --shadow:    0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+}
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); }
+
+/* ── Layout shell ─────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#header { padding: 14px 20px 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; display: flex; align-items: baseline; gap: 12px; }
+#header h1 { font-size: 16px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
+#header p  { font-size: 12px; color: var(--text2); }
+
+#main { display: flex; flex: 1; overflow: hidden; }
+.panel { background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; }
+
+#left-panel   { width: 278px; flex-shrink: 0; padding: 14px; display: flex; flex-direction: column; gap: 13px; }
+#center-panel { flex: 1; min-width: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+#center-top   { padding: 14px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#plot-area    { flex: 1; min-height: 0; padding: 12px 16px; display: flex; flex-direction: column; }
+#right-panel  { width: 262px; flex-shrink: 0; padding: 14px; display: flex; flex-direction: column; gap: 12px; border-right: none; }
+
+#bottom-panel  { height: 256px; flex-shrink: 0; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+#bottom-header { padding: 9px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; flex-shrink: 0; flex-wrap: wrap; }
+#table-wrap    { flex: 1; overflow: auto; }
+
+/* ── Typography helpers ───────────────────────────────────── */
+.section-title { font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 7px; text-transform: uppercase; letter-spacing: .05em; }
+.hint { font-size: 11px; color: var(--text3); margin-top: 3px; display: block; line-height: 1.4; }
+
+/* ── Drop zones ───────────────────────────────────────────── */
+.dropzone {
+  border: 2px dashed var(--border2); border-radius: var(--radius);
+  padding: 18px 10px; text-align: center; cursor: pointer;
+  transition: border-color .15s, background .15s; background: #fafbfc;
+}
+.dropzone:hover, .dropzone.drag-over { border-color: var(--accent); background: #eff6ff; }
+.dropzone .dz-icon { font-size: 18px; color: var(--text3); margin-bottom: 5px; }
+.dropzone .dz-text { font-size: 12px; color: var(--text2); line-height: 1.4; }
+.dropzone .dz-hint { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+.dropzone-sm { padding: 11px 10px; }
+.dropzone-sm .dz-icon { font-size: 14px; }
+.dropzone-sm .dz-text { font-size: 11.5px; }
+
+/* ── File list ────────────────────────────────────────────── */
+.file-list { display: flex; flex-direction: column; gap: 5px; }
+.file-item { display: flex; align-items: flex-start; gap: 7px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fafbfc; }
+.fi-icon { font-size: 13px; flex-shrink: 0; padding-top: 1px; }
+.fi-info { flex: 1; min-width: 0; }
+.fi-name { font-size: 11.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fi-meta { font-size: 10.5px; color: var(--text3); }
+.fi-label-input { font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; width: 100%; margin-top: 3px; background: var(--surface); color: var(--text); outline: none; }
+.fi-label-input:focus { border-color: var(--accent); }
+.fi-remove { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 13px; padding: 2px; flex-shrink: 0; line-height: 1; }
+.fi-remove:hover { color: var(--error); }
+
+/* ── Status / info banners ────────────────────────────────── */
+.status-banner { font-size: 11.5px; padding: 6px 9px; border-radius: 5px; display: flex; align-items: flex-start; gap: 6px; line-height: 1.4; }
+.status-ok     { background: #f0fdf4; color: var(--success); border: 1px solid #bbf7d0; }
+.status-warn   { background: #fffbeb; color: var(--warn);    border: 1px solid #fde68a; }
+.status-error  { background: #fef2f2; color: var(--error);   border: 1px solid #fecaca; }
+.status-info   { background: #eff6ff; color: var(--accent);  border: 1px solid #bfdbfe; }
+
+/* ── Form controls ────────────────────────────────────────── */
+.select-styled {
+  width: 100%; padding: 6px 9px; border: 1px solid var(--border2);
+  border-radius: 6px; font-size: 12.5px; color: var(--text); background: var(--surface);
+  cursor: pointer; outline: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6272' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; padding-right: 26px;
+}
+.select-styled:focus { border-color: var(--accent); }
+.text-input {
+  width: 100%; padding: 6px 9px; border: 1px solid var(--border2);
+  border-radius: 6px; font-size: 12.5px; color: var(--text);
+  background: var(--surface); outline: none;
+}
+.text-input:focus { border-color: var(--accent); }
+.text-input.auto-filled { background: #f0fdf4; border-color: #86efac; color: #15803d; }
+.form-label { font-size: 11px; font-weight: 600; color: var(--text2); margin-bottom: 3px; display: block; }
+.form-row { margin-bottom: 8px; }
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+
+/* ── Buttons ──────────────────────────────────────────────── */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 500; border: 1px solid transparent; cursor: pointer; transition: all .12s; white-space: nowrap; }
+.btn-primary  { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover  { background: var(--accent-h); border-color: var(--accent-h); }
+.btn-primary:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
+.btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border2); }
+.btn-secondary:hover { background: var(--bg); }
+.btn-full { width: 100%; }
+.btn-sm { padding: 4px 10px; font-size: 11.5px; }
+
+/* ── Advanced settings accordion ─────────────────────────── */
+.accordion-toggle { background: none; border: none; cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 500; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
+.accordion-toggle:hover { color: var(--accent-h); }
+.accordion-body { display: none; margin-top: 9px; }
+.accordion-body.open { display: block; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.setting-item label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 3px; font-weight: 500; }
+.setting-item input { width: 100%; padding: 5px 7px; border: 1px solid var(--border2); border-radius: 5px; font-size: 12px; color: var(--text); background: var(--surface); outline: none; }
+.setting-item input:focus { border-color: var(--accent); }
+.setting-full { grid-column: 1 / -1; }
+
+/* ── Gene navigation ──────────────────────────────────────── */
+#gene-nav { display: flex; align-items: center; gap: 7px; margin-top: 11px; }
+#gene-select-wrap { flex: 1; }
+.nav-btn { padding: 5px 9px; border: 1px solid var(--border2); background: var(--surface); border-radius: 5px; cursor: pointer; color: var(--text2); font-size: 13px; line-height: 1; }
+.nav-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+.nav-btn:disabled { opacity: .35; cursor: not-allowed; }
+#gene-counter { font-size: 11px; color: var(--text3); white-space: nowrap; }
+
+/* ── Plot ─────────────────────────────────────────────────── */
+.plot-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text3); gap: 8px; }
+.plot-placeholder svg { opacity: .28; }
+.plot-placeholder p { font-size: 13px; }
+#plot-container { display: none; flex: 1; min-height: 0; position: relative; }
+#plot-container canvas { max-height: 100%; }
+
+/* ── Drug tag ─────────────────────────────────────────────── */
+.drug-tag { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 20px; background: #ede9fe; color: #6d28d9; white-space: nowrap; }
+
+/* ── Right panel / Metrics ────────────────────────────────── */
+.metrics-empty { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; color: var(--text3); text-align: center; padding: 20px; }
+.metrics-empty svg { opacity: .25; }
+.gene-header { padding: 9px 11px; border-radius: 6px; margin-bottom: 9px; }
+.gene-header .gene-name { font-size: 14px; font-weight: 700; }
+.gene-header .gene-prot { font-size: 10px; color: var(--text2); margin-top: 2px; word-break: break-all; }
+.gene-header.up   { background: var(--up-light);   border-left: 3px solid var(--up); }
+.gene-header.down { background: var(--down-light); border-left: 3px solid var(--down); }
+.gene-header.none { background: var(--none-light); border-left: 3px solid var(--none-c); }
+.direction-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-top: 5px; text-transform: uppercase; letter-spacing: .04em; }
+.chip-up   { background: var(--up);   color: #fff; }
+.chip-down { background: var(--down); color: #fff; }
+.chip-none { background: #e5e7eb; color: var(--text2); }
+.metric-row { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.metric-row:last-child { border-bottom: none; }
+.metric-label { font-size: 11px; color: var(--text2); }
+.metric-value { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.metric-value.good { color: var(--success); }
+.metric-value.warn { color: var(--warn); }
+.metric-value.bad  { color: var(--error); }
+.fit-badge { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 5px; font-size: 11.5px; font-weight: 500; }
+.fit-ok   { background: #f0fdf4; color: var(--success); }
+.fit-warn { background: #fffbeb; color: var(--warn); }
+.r2-bar  { height: 4px; border-radius: 2px; background: var(--border); margin-top: 3px; overflow: hidden; }
+.r2-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+.conf-section { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+
+/* ── Table ────────────────────────────────────────────────── */
+.search-input { flex: 1; padding: 5px 9px; border: 1px solid var(--border2); border-radius: 5px; font-size: 12px; outline: none; color: var(--text); }
+.search-input:focus { border-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th { position: sticky; top: 0; background: #f8f9fa; padding: 6px 11px; font-weight: 600; font-size: 11px; color: var(--text2); text-align: left; border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap; user-select: none; }
+thead th:hover { background: #eff0f2; color: var(--text); }
+thead th.sorted .sort-icon { color: var(--accent); opacity: 1; }
+.sort-icon { margin-left: 3px; opacity: .4; font-size: 10px; }
+tbody tr { border-bottom: 1px solid var(--border); cursor: pointer; transition: background .07s; }
+tbody tr:hover   { background: #f0f4ff; }
+tbody tr.selected { background: #dbeafe; }
+tbody td { padding: 5px 11px; }
+tbody td.gene-cell { font-weight: 600; }
+.dir-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; }
+.dir-up   { background: var(--up-light);   color: var(--up); }
+.dir-down { background: var(--down-light); color: var(--down); }
+.dir-none { background: #f3f4f6; color: var(--none-c); }
+
+/* ── Spinner ──────────────────────────────────────────────── */
+.spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; flex-shrink: 0; }
+.spinner-dark { border-color: var(--border); border-top-color: var(--accent); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Misc ─────────────────────────────────────────────────── */
+.divider { height: 1px; background: var(--border); }
+.row-gap { display: flex; gap: 7px; align-items: center; }
+.flex-1  { flex: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ══════════════════════ HEADER ═══════════════════════════ -->
+<div id="header">
+  <h1>Protein Dose-Response Curve Generator</h1>
+  <p>Upload proteomics data and generate dose-response curves</p>
+</div>
+
+<!-- ══════════════════════ MAIN ══════════════════════════════ -->
+<div id="main">
+
+  <!-- ─────────────────── LEFT PANEL ───────────────────── -->
+  <div class="panel" id="left-panel">
+
+    <!-- 1. Protein file -->
+    <div>
+      <div class="section-title">Protein Data</div>
+      <div id="protein-dropzone" class="dropzone"
+           onclick="document.getElementById('protein-input').click()"
+           ondragover="dzDragOver(event,'protein-dropzone')"
+           ondragleave="dzDragLeave('protein-dropzone')"
+           ondrop="dzDrop(event,'protein')">
+        <div class="dz-icon">↑</div>
+        <div class="dz-text">Drop protein file here or click</div>
+        <div class="dz-hint">proteinGroups.txt · combined_protein.tsv · XLSX</div>
+      </div>
+      <input type="file" id="protein-input" style="display:none" accept=".txt,.tsv,.csv,.xlsx"
+             onchange="handleProteinFile(this.files[0])"/>
+      <div id="protein-file-list" class="file-list" style="margin-top:7px;display:none;"></div>
+    </div>
+
+    <!-- 2. Mapping sheet -->
+    <div>
+      <div class="section-title" style="margin-bottom:5px;">
+        Mapping Sheet
+        <span style="font-weight:400;color:var(--text3);font-size:10px;text-transform:none;letter-spacing:0;"> — required</span>
+      </div>
+      <div id="mapping-dropzone" class="dropzone dropzone-sm"
+           onclick="document.getElementById('mapping-input').click()"
+           ondragover="dzDragOver(event,'mapping-dropzone')"
+           ondragleave="dzDragLeave('mapping-dropzone')"
+           ondrop="dzDrop(event,'mapping')">
+        <div class="dz-icon">📋</div>
+        <div class="dz-text">Drop mapping sheet (XLSX)</div>
+        <div class="dz-hint">sample · drug · ID columns</div>
+      </div>
+      <input type="file" id="mapping-input" style="display:none" accept=".xlsx,.xls,.csv,.tsv,.txt"
+             onchange="handleMappingFile(this.files[0])"/>
+      <div id="mapping-status" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 3. Format + drug settings -->
+    <div class="form-row">
+      <label class="form-label">Input Format</label>
+      <select class="select-styled" id="format-select" onchange="onFormatChange()">
+        <option value="maxquant">MaxQuant (proteinGroups.txt)</option>
+        <option value="fragpipe">FragPipe (combined_protein.tsv)</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">Drug Name</label>
+      <input type="text" class="text-input" id="drug-name-input" value="Methotrexate"
+             placeholder="e.g. Methotrexate" oninput="onDrugNameChange()"/>
+    </div>
+
+    <div class="form-row-2">
+      <div>
+        <label class="form-label">Drug ID <span style="font-weight:400;color:var(--text3);">(auto)</span></label>
+        <input type="text" class="text-input" id="drug-id-input" placeholder="e.g. 71"
+               title="Auto-filled from mapping sheet; override if needed"/>
+      </div>
+      <div>
+        <label class="form-label">Plate # <span style="font-weight:400;color:var(--text3);">(auto)</span></label>
+        <input type="text" class="text-input" id="plate-num-input" placeholder="e.g. 1"
+               title="Auto-filled from mapping sheet; override if needed"/>
+      </div>
+    </div>
+
+    <div id="column-preview" style="display:none;">
+      <div class="status-banner status-info" style="font-size:10.5px;" id="column-preview-text"></div>
+    </div>
+
+    <button class="btn btn-primary btn-full" id="run-btn" onclick="runAnalysis()">
+      ▶ Run Analysis
+    </button>
+
+    <div id="run-status" style="display:none;"></div>
+
+  </div><!-- /left -->
+
+  <!-- ─────────────────── CENTER PANEL ───────────────────── -->
+  <div id="center-panel">
+    <div id="center-top">
+      <div class="section-title" style="margin-bottom:8px;">Analysis Settings</div>
+
+      <div class="row-gap" style="margin-bottom:8px;">
+        <select class="select-styled flex-1" id="algorithm-select">
+          <option value="ll4">4-Parameter Log-Logistic (4PL / LL.4)</option>
+          <option disabled>3-Parameter Log-Logistic — coming soon</option>
+          <option disabled>5-Parameter Log-Logistic — coming soon</option>
+        </select>
+        <span class="drug-tag" id="drug-tag">Methotrexate</span>
+      </div>
+
+      <button class="accordion-toggle" onclick="toggleAccordion()">
+        <span id="acc-arrow">▸</span>
+        <span id="acc-label">Show advanced settings</span>
+      </button>
+
+      <div class="accordion-body" id="adv-settings">
+        <div class="settings-grid" style="margin-top:0;">
+          <div class="setting-item">
+            <label>Min R²</label>
+            <input type="number" id="s-minr2"  value="0.8"  step="0.05" min="0" max="1"/>
+          </div>
+          <div class="setting-item">
+            <label>Min valid pts</label>
+            <input type="number" id="s-minpts" value="4"    step="1"    min="2" max="5"/>
+          </div>
+          <div class="setting-item">
+            <label>FC up threshold</label>
+            <input type="number" id="s-fcup"   value="1.5"  step="0.1"  min="1"/>
+          </div>
+          <div class="setting-item">
+            <label>FC down threshold</label>
+            <input type="number" id="s-fcdn"   value="0.7"  step="0.1"  min="0" max="1"/>
+          </div>
+          <div class="setting-item">
+            <label>Min effect</label>
+            <input type="number" id="s-mineff" value="0.15" step="0.05"/>
+          </div>
+          <div class="setting-item">
+            <label>DMSO / plate</label>
+            <input type="number" id="s-dmso"   value="6"    step="1"    min="1"/>
+          </div>
+          <div class="setting-item setting-full">
+            <label>Doses (nM, comma-separated)</label>
+            <input type="text"   id="s-doses"  value="1,10,100,1000,10000"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gene nav -->
+      <div id="gene-nav" style="margin-top:11px;">
+        <div id="gene-select-wrap">
+          <select class="select-styled" id="gene-select" onchange="selectGeneByIndex(this.value)">
+            <option value="">— select gene —</option>
+          </select>
+        </div>
+        <button class="nav-btn" id="prev-btn" onclick="navigateGene(-1)" disabled title="Previous">‹</button>
+        <button class="nav-btn" id="next-btn" onclick="navigateGene(1)"  disabled title="Next">›</button>
+        <span id="gene-counter"></span>
+      </div>
+    </div><!-- /center-top -->
+
+    <div id="plot-area">
+      <div id="plot-placeholder" class="plot-placeholder">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect x="4" y="4" width="40" height="40" rx="4" stroke="#9aa0ad" stroke-width="2"/>
+          <polyline points="8,36 16,20 24,24 32,14 40,10" stroke="#9aa0ad" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p>Run analysis to view curves</p>
+      </div>
+      <div id="plot-container">
+        <canvas id="drc-chart"></canvas>
+      </div>
+    </div>
+  </div><!-- /center -->
+
+  <!-- ─────────────────── RIGHT PANEL ───────────────────── -->
+  <div class="panel" id="right-panel">
+    <div>
+      <div class="section-title">Fit Summary</div>
+      <p style="font-size:11px;color:var(--text2);">Parameters for selected gene</p>
+    </div>
+
+    <div id="metrics-empty" class="metrics-empty">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#9aa0ad" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <p style="font-size:12px;">Select a gene to view<br/>fit parameters</p>
+    </div>
+
+    <div id="metrics-content" style="display:none;">
+      <div id="gene-header-card"></div>
+      <div class="fit-badge" id="fit-status-badge"></div>
+
+      <div style="margin-top:10px;">
+        <div class="metric-row"><span class="metric-label">EC50</span>         <span class="metric-value" id="m-ec50">—</span></div>
+        <div class="metric-row"><span class="metric-label">pEC50</span>        <span class="metric-value" id="m-pec50">—</span></div>
+        <div class="metric-row"><span class="metric-label">Hill slope</span>   <span class="metric-value" id="m-slope">—</span></div>
+        <div class="metric-row"><span class="metric-label">Top</span>          <span class="metric-value" id="m-top">—</span></div>
+        <div class="metric-row"><span class="metric-label">Bottom</span>       <span class="metric-value" id="m-bottom">—</span></div>
+        <div class="metric-row"><span class="metric-label">AUC</span>          <span class="metric-value" id="m-auc">—</span></div>
+        <div class="metric-row"><span class="metric-label">FC at max dose</span><span class="metric-value" id="m-fc">—</span></div>
+        <div class="metric-row" style="flex-direction:column;align-items:stretch;">
+          <div style="display:flex;justify-content:space-between;">
+            <span class="metric-label">R²</span>
+            <span class="metric-value" id="m-r2">—</span>
+          </div>
+          <div class="r2-bar"><div class="r2-fill" id="r2-bar-fill"></div></div>
+        </div>
+        <div class="metric-row"><span class="metric-label">Valid data points</span><span class="metric-value" id="m-npts">—</span></div>
+      </div>
+
+      <div class="conf-section">
+        <div class="section-title" style="font-size:10px;margin-bottom:5px;">Confidence</div>
+        <div style="height:5px;border-radius:3px;background:var(--border);overflow:hidden;">
+          <div id="conf-fill" style="height:100%;border-radius:3px;transition:width .3s;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:2px;">
+          <span style="font-size:9.5px;color:var(--text3);">Low</span>
+          <span style="font-size:10px;color:var(--text2);font-weight:600;" id="conf-label">—</span>
+          <span style="font-size:9.5px;color:var(--text3);">High</span>
+        </div>
+      </div>
+    </div>
+  </div><!-- /right -->
+
+</div><!-- /main -->
+
+<!-- ══════════════════════ BOTTOM ════════════════════════════ -->
+<div id="bottom-panel">
+  <div id="bottom-header">
+    <span style="font-size:12px;font-weight:600;flex-shrink:0;">Results</span>
+    <span id="table-count" style="font-size:11px;color:var(--text3);flex-shrink:0;"></span>
+    <input class="search-input" id="table-search" type="text"
+           placeholder="Search gene or protein ID…" oninput="filterTable()" style="max-width:220px;"/>
+    <select class="select-styled" id="filter-dir" onchange="filterTable()" style="width:130px;flex-shrink:0;">
+      <option value="all">All directions</option>
+      <option value="up">↑ Up-regulated</option>
+      <option value="down">↓ Down-regulated</option>
+      <option value="none">— Unregulated</option>
+    </select>
+    <div style="flex:1;"></div>
+    <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ Export CSV</button>
+  </div>
+  <div id="table-wrap">
+    <div id="table-empty" style="padding:28px;text-align:center;color:var(--text3);font-size:12.5px;">
+      Upload protein data and run analysis to populate results
+    </div>
+    <table id="results-table" style="display:none;">
+      <thead>
+        <tr>
+          <th onclick="sortTable('gene')"       data-col="gene">      Gene <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('protein_id')" data-col="protein_id">Protein ID <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('direction')"  data-col="direction">  Direction <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('ec50_nM')"    data-col="ec50_nM">   EC50 (nM) <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('pec50')"      data-col="pec50">     pEC50 <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('slope')"      data-col="slope">     Hill slope <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('r2')"         data-col="r2">        R² <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('auc')"        data-col="auc">       AUC <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('fc_max')"     data-col="fc_max">    FC at max <span class="sort-icon">↕</span></th>
+          <th onclick="sortTable('n_valid')"    data-col="n_valid">   N pts <span class="sort-icon">↕</span></th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<!-- ══════════════════════ JAVASCRIPT ════════════════════════ -->
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  proteinFile:    null,   // raw File object
+  mappingFile:    null,   // raw File object
+  parsedMapping:  null,   // { rows, header, colSample, colDrug, colId }
+  results:        [],
+  filteredRows:   [],
+  sortCol:        'gene',
+  sortAsc:        true,
+  selectedIdx:    null,
+  chart:          null,
+  analysisRan:    false,
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+const r3 = v => Math.round(v * 1000)   / 1000;
+const r4 = v => Math.round(v * 10000)  / 10000;
+
+function nanMean(arr) {
+  const valid = arr.filter(v => isFinite(v));
+  return valid.length ? valid.reduce((a, b) => a + b) / valid.length : NaN;
+}
+
+function getSettings() {
+  const dosesRaw = document.getElementById('s-doses').value;
+  return {
+    dosesNm:      dosesRaw.split(',').map(s => parseFloat(s.trim())).filter(isFinite),
+    dmsoPerPlate: parseInt(document.getElementById('s-dmso').value)   || 6,
+    minR2:        parseFloat(document.getElementById('s-minr2').value) || 0.8,
+    minValidPts:  parseInt(document.getElementById('s-minpts').value)  || 4,
+    fcUp:         parseFloat(document.getElementById('s-fcup').value)  || 1.5,
+    fcDown:       parseFloat(document.getElementById('s-fcdn').value)  || 0.7,
+    minEffect:    parseFloat(document.getElementById('s-mineff').value)|| 0.15,
+  };
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  4PL MATH  — mirrors Python ll4 exactly
+//  f(x) = bottom + (top - bottom) / (1 + exp(slope*(ln(x)-ln(ec50))))
+// ═══════════════════════════════════════════════════════════════
+function ll4(x, slope, bottom, top, ec50) {
+  const safEc50 = Math.max(ec50, 1e-12);
+  const logTerm = Math.min(Math.max(slope * (Math.log(x) - Math.log(safEc50)), -700), 700);
+  return bottom + (top - bottom) / (1.0 + Math.exp(logTerm));
+}
+
+// ── Nelder-Mead simplex optimizer ─────────────────────────────
+function nelderMead(costFn, x0, opts = {}) {
+  const n = x0.length;
+  const maxIter = opts.maxIter || 3000;
+  const tol     = opts.tol     || 1e-12;
+  const alpha = 1.0, gamma = 2.0, rho = 0.5, sigma = 0.5;
+
+  // Build initial simplex
+  let S = [x0.slice()];
+  for (let i = 0; i < n; i++) {
+    const v = x0.slice();
+    v[i] = Math.abs(v[i]) > 1e-8 ? v[i] * 1.05 : 0.00025;
+    S.push(v);
+  }
+  let f = S.map(v => costFn(v));
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    // Sort ascending
+    const ord = f.map((_, i) => i).sort((a, b) => f[a] - f[b]);
+    S = ord.map(i => S[i]);
+    f = ord.map(i => f[i]);
+
+    if (f[n] - f[0] < tol) break;
+
+    // Centroid (exclude worst)
+    const xo = new Array(n).fill(0);
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        xo[j] += S[i][j] / n;
+
+    // Reflection
+    const xr = xo.map((c, j) => c + alpha * (c - S[n][j]));
+    const fr  = costFn(xr);
+
+    if (fr < f[0]) {
+      const xe = xo.map((c, j) => c + gamma * (xr[j] - c));
+      const fe = costFn(xe);
+      if (fe < fr) { S[n] = xe; f[n] = fe; } else { S[n] = xr; f[n] = fr; }
+    } else if (fr < f[n - 1]) {
+      S[n] = xr; f[n] = fr;
+    } else {
+      const xc = xo.map((c, j) => c + rho * (S[n][j] - c));
+      const fc = costFn(xc);
+      if (fc < f[n]) { S[n] = xc; f[n] = fc; }
+      else {
+        for (let i = 1; i <= n; i++) {
+          S[i] = S[0].map((x, j) => x + sigma * (S[i][j] - x));
+          f[i] = costFn(S[i]);
+        }
+      }
+    }
+  }
+  return { x: S[0], fval: f[0] };
+}
+
+// ── Fit LL.4 for one gene ─────────────────────────────────────
+// Returns { success, params } or { success: false, reason }
+// Mirrors Python fit_ll4: tries both slope signs, takes best cost
+function fitLL4(doses, responses, opts = {}) {
+  const doseMinGuard = opts.doseMinGuard ?? Math.min(...doses) * 0.1;
+  const doseMaxGuard = opts.doseMaxGuard ?? Math.max(...doses) * 10;
+  const minEffect    = opts.minEffect    ?? 0.15;
+
+  const minDoseIdx = doses.indexOf(Math.min(...doses));
+  const maxDoseIdx = doses.indexOf(Math.max(...doses));
+  const top0    = responses[minDoseIdx];   // response at lowest dose ≈ top
+  const bottom0 = responses[maxDoseIdx];   // response at highest dose ≈ bottom
+  const ec50_0  = Math.sqrt(Math.min(...doses) * Math.max(...doses));
+  const slope0  = bottom0 < top0 ? -1 : 1;
+
+  const costFn = ([slope, bottom, top, ec50]) => {
+    if (ec50 <= 0 || !isFinite(ec50)) return 1e15;
+    let s = 0;
+    for (let i = 0; i < doses.length; i++) {
+      const diff = responses[i] - ll4(doses[i], slope, bottom, top, ec50);
+      s += diff * diff;
+    }
+    return isFinite(s) ? s : 1e15;
+  };
+
+  let best = null;
+  let bestCost = Infinity;
+
+  // Try both slope signs (mirrors Python's two-sign loop)
+  for (const s0 of [slope0, -slope0]) {
+    try {
+      const res = nelderMead(costFn, [s0, bottom0, top0, ec50_0], { maxIter: 3000, tol: 1e-12 });
+      if (res.fval < bestCost) { bestCost = res.fval; best = res.x; }
+    } catch(e) { /* skip */ }
+  }
+
+  if (!best) return { success: false, reason: 'optimization failed' };
+
+  const [slope, bottom, top, ec50] = best;
+
+  if (!isFinite(ec50) || ec50 <= 0)
+    return { success: false, reason: `EC50 not finite (${ec50})` };
+  if (ec50 < doseMinGuard || ec50 > doseMaxGuard)
+    return { success: false, reason: `EC50 out of range (${r3(ec50)} nM)` };
+  if (Math.abs(top - bottom) < minEffect)
+    return { success: false, reason: `flat curve |top-bottom|=${Math.abs(top-bottom).toFixed(3)}` };
+
+  return { success: true, params: { slope, bottom, top, ec50 } };
+}
+
+// ── AUC over log10 dose, normalised by log-dose span ──────────
+function computeAUC(slope, bottom, top, ec50, logMin, logMax, n = 200) {
+  let prev = ll4(Math.pow(10, logMin), slope, bottom, top, ec50);
+  let auc  = 0;
+  const step = (logMax - logMin) / (n - 1);
+  for (let i = 1; i < n; i++) {
+    const lx = logMin + i * step;
+    const cur = ll4(Math.pow(10, lx), slope, bottom, top, ec50);
+    auc += (prev + cur) * 0.5 * step;
+    prev = cur;
+  }
+  const span = logMax - logMin;
+  return isFinite(auc) && span > 0 ? auc / span : NaN;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FILE DRAG-DROP HELPERS
+// ═══════════════════════════════════════════════════════════════
+function dzDragOver(e, id) { e.preventDefault(); document.getElementById(id).classList.add('drag-over'); }
+function dzDragLeave(id)   { document.getElementById(id).classList.remove('drag-over'); }
+function dzDrop(e, type) {
+  e.preventDefault();
+  const id = type === 'protein' ? 'protein-dropzone' : 'mapping-dropzone';
+  document.getElementById(id).classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (type === 'protein') handleProteinFile(file);
+  else                    handleMappingFile(file);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PROTEIN FILE HANDLER
+// ═══════════════════════════════════════════════════════════════
+function handleProteinFile(file) {
+  if (!file) return;
+  S.proteinFile = file;
+  const listEl = document.getElementById('protein-file-list');
+  const kb = (file.size / 1024).toFixed(1);
+  listEl.style.display = 'flex';
+  listEl.innerHTML = `
+    <div class="file-item">
+      <div class="fi-icon">📄</div>
+      <div class="fi-info">
+        <div class="fi-name" title="${file.name}">${file.name}</div>
+        <div class="fi-meta">${kb} KB</div>
+        <input class="fi-label-input" value="${file.name.replace(/\.[^.]+$/,'')}" placeholder="Label…"/>
+      </div>
+      <button class="fi-remove" onclick="clearProteinFile()">✕</button>
+    </div>`;
+  // Auto-detect format from filename
+  if (/combined_protein/i.test(file.name)) {
+    document.getElementById('format-select').value = 'fragpipe';
+  } else if (/protein.*groups/i.test(file.name) || /proteinGroups/i.test(file.name)) {
+    document.getElementById('format-select').value = 'maxquant';
+  }
+  refreshColumnPreview();
+}
+
+function clearProteinFile() {
+  S.proteinFile = null;
+  document.getElementById('protein-file-list').style.display = 'none';
+  document.getElementById('protein-file-list').innerHTML = '';
+  document.getElementById('protein-input').value = '';
+  document.getElementById('column-preview').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAPPING SHEET HANDLER
+// ═══════════════════════════════════════════════════════════════
+function handleMappingFile(file) {
+  if (!file) return;
+  S.mappingFile  = file;
+  S.parsedMapping = null;
+
+  setMappingStatus('info', `⟳ Parsing ${file.name}…`);
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb   = XLSX.read(data, { type: 'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      // Use header:1 to get raw arrays
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+      if (!rows.length) throw new Error('Mapping sheet is empty');
+
+      const rawHeader = rows[0];
+      const header    = rawHeader.map(c => c ? String(c).trim().toLowerCase() : '');
+
+      const colSample = 0;
+      const colDrug   = header.indexOf('drug');
+      const colId     = header.indexOf('id');
+
+      if (colDrug < 0) throw new Error('"drug" column not found in mapping sheet. Found: ' + rawHeader.filter(Boolean).join(', '));
+      if (colId   < 0) throw new Error('"id" column not found in mapping sheet. Found: '   + rawHeader.filter(Boolean).join(', '));
+
+      S.parsedMapping = { rows: rows.slice(1), colSample, colDrug, colId };
+
+      setMappingStatus('ok', `✓ Loaded — ${rows.length - 1} rows`);
+      tryAutoFill();
+    } catch(err) {
+      S.parsedMapping = null;
+      setMappingStatus('error', '✕ ' + err.message);
+    }
+  };
+  reader.onerror = () => setMappingStatus('error', '✕ Could not read file');
+  reader.readAsArrayBuffer(file);
+}
+
+function setMappingStatus(type, msg) {
+  const el = document.getElementById('mapping-status');
+  el.innerHTML = `<div class="status-banner status-${type}" style="font-size:11px;">${msg}</div>`;
+}
+
+// ── Auto-fill drug ID & plate from mapping sheet ───────────────
+function tryAutoFill() {
+  if (!S.parsedMapping) return;
+  const drugName = document.getElementById('drug-name-input').value.trim();
+  if (!drugName) return;
+  const { resolved } = resolveDrugFromMapping(drugName);
+  if (!resolved) {
+    setMappingStatus('warn', `⚠ Drug "${drugName}" not found in mapping sheet`);
+    return;
+  }
+  const idInput    = document.getElementById('drug-id-input');
+  const plateInput = document.getElementById('plate-num-input');
+  idInput.value    = resolved.drugId;
+  plateInput.value = resolved.plateNum;
+  idInput.classList.add('auto-filled');
+  plateInput.classList.add('auto-filled');
+  setMappingStatus('ok', `✓ ${drugName} → ID: ${resolved.drugId}, Plate: ${resolved.plateNum}`);
+  refreshColumnPreview();
+}
+
+function onDrugNameChange() {
+  const name = document.getElementById('drug-name-input').value.trim();
+  document.getElementById('drug-tag').textContent = name || '—';
+  // Clear auto-fill styling
+  document.getElementById('drug-id-input').classList.remove('auto-filled');
+  document.getElementById('plate-num-input').classList.remove('auto-filled');
+  tryAutoFill();
+}
+
+function onFormatChange() { refreshColumnPreview(); }
+
+// ─── Resolve drug → { drugId, plateNum } from mapping ─────────
+// Mirrors Python sections 3 and 3b exactly
+function resolveDrugFromMapping(drugName) {
+  if (!S.parsedMapping) return { resolved: null };
+  const { rows, colSample, colDrug, colId } = S.parsedMapping;
+  const nameLower = drugName.trim().toLowerCase();
+
+  // Step 1: find drug ID (first row where drug col matches)
+  let drugId = null;
+  for (const row of rows) {
+    const d = row[colDrug];
+    if (d && String(d).trim().toLowerCase() === nameLower) {
+      const raw = row[colId];
+      if (raw != null) {
+        drugId = String(typeof raw === 'number' ? Math.round(raw) : raw);
+      }
+      break;
+    }
+  }
+  if (!drugId) return { resolved: null };
+
+  // Step 2: find plate number from sample column
+  // Pattern: ^Plate{N}_{DrugName}_{digit}  (case-insensitive)
+  const esc = escapeRegex(drugName.trim());
+  const pat = new RegExp(`^plate(\\d+)_${esc}_\\d`, 'i');
+
+  const plateNums = [];
+  for (const row of rows) {
+    const s = row[colSample] ? String(row[colSample]).trim() : '';
+    const m = s.match(pat);
+    if (m) plateNums.push(parseInt(m[1]));
+  }
+
+  if (!plateNums.length) return { resolved: null };
+  const unique = [...new Set(plateNums)].sort((a, b) => a - b);
+  const plateNum = unique[0];
+
+  return { resolved: { drugId, plateNum } };
+}
+
+// ─── Preview which columns will be used ───────────────────────
+function refreshColumnPreview() {
+  const drugId   = document.getElementById('drug-id-input').value.trim();
+  const plateNum = parseInt(document.getElementById('plate-num-input').value.trim());
+  const format   = document.getElementById('format-select').value;
+  const drugName = document.getElementById('drug-name-input').value.trim();
+  const { dosesNm, dmsoPerPlate } = getSettings();
+  const prevEl   = document.getElementById('column-preview');
+
+  if (!drugId || !plateNum) { prevEl.style.display = 'none'; return; }
+
+  let dmsoExample, treatExample;
+  if (format === 'maxquant') {
+    const dmsoStart = (plateNum - 1) * dmsoPerPlate + 1;
+    dmsoExample  = `LFQ Intensity DMSO${dmsoStart} … DMSO${plateNum * dmsoPerPlate}`;
+    treatExample = `LFQ Intensity ${drugId} ${dosesNm[0]}, … ${dosesNm[dosesNm.length-1]}`;
+  } else {
+    dmsoExample  = `DMSO_${plateNum}_1 … DMSO_${plateNum}_${dmsoPerPlate} MaxLFQ Intensity`;
+    const dl = drugName.toLowerCase();
+    treatExample = `${dl}_${dosesNm[0]} … ${dl}_${dosesNm[dosesNm.length-1]} MaxLFQ Intensity`;
+  }
+
+  document.getElementById('column-preview-text').textContent =
+    `DMSO: ${dmsoExample}`;
+  prevEl.style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PARSE PROTEIN FILE  (TSV/TXT or XLSX)
+// ═══════════════════════════════════════════════════════════════
+async function parseProteinFile(file, format) {
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  let rows;
+  if (ext === 'xlsx' || ext === 'xls') {
+    rows = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          resolve(XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false }));
+        } catch(err) { reject(err); }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  } else {
+    // Tab-separated text (MaxQuant / FragPipe .txt / .tsv)
+    const text = await file.text();
+    const sep  = text.includes('\t') ? '\t' : ',';
+    rows = text.split(/\r?\n/).map(line => line.split(sep));
+  }
+
+  if (!rows || rows.length < 2) throw new Error('File appears empty');
+
+  const header = rows[0].map(h => h ? String(h).trim() : '');
+  const geneColName = format === 'maxquant' ? 'Gene names' : 'Gene';
+  const protColName = format === 'maxquant' ? 'Protein IDs' : 'Protein ID';
+
+  const geneCol = header.indexOf(geneColName);
+  const protCol = header.findIndex(h => h === protColName || h === 'Protein IDs' || h === 'Protein ID');
+
+  if (geneCol < 0)
+    throw new Error(`Column "${geneColName}" not found.\nFile has: ${header.slice(0, 8).join(', ')}…`);
+
+  return { header, geneCol, protCol, dataRows: rows.slice(1) };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN PIPELINE  — follows Python sections 4-9 exactly
+// ═══════════════════════════════════════════════════════════════
+function runPipeline(parsed, drugId, plateNum, format, drugName, settings) {
+  const { header, geneCol, protCol, dataRows } = parsed;
+  const { dosesNm, dmsoPerPlate, minR2, minValidPts, fcUp, fcDown, minEffect } = settings;
+
+  // ── Build column name lists (mirrors Python 3b) ──────────────
+  let dmsoColNames, treatColNames;
+  const fmt = format.toLowerCase();
+
+  if (fmt === 'maxquant') {
+    const dmsoStart = (plateNum - 1) * dmsoPerPlate + 1;
+    const dmsoEnd   = plateNum * dmsoPerPlate;
+    dmsoColNames  = [];
+    for (let i = dmsoStart; i <= dmsoEnd; i++) dmsoColNames.push(`LFQ Intensity DMSO${i}`);
+    treatColNames = dosesNm.map(d => `LFQ Intensity ${drugId} ${d}`);
+  } else {
+    dmsoColNames  = [];
+    for (let r = 1; r <= dmsoPerPlate; r++) dmsoColNames.push(`DMSO_${plateNum}_${r} MaxLFQ Intensity`);
+    const dl = drugName.trim().toLowerCase();
+    treatColNames = dosesNm.map(d => `${dl}_${d} MaxLFQ Intensity`);
+  }
+
+  // ── Resolve column indices ───────────────────────────────────
+  const missing = [];
+  const dmsoCols  = dmsoColNames.map(n  => { const i = header.indexOf(n);  if (i < 0) missing.push(n);  return i; });
+  const treatCols = treatColNames.map(n => { const i = header.indexOf(n);  if (i < 0) missing.push(n);  return i; });
+
+  if (missing.length) {
+    throw new Error(
+      `These columns were not found in the protein file:\n${missing.slice(0,5).join('\n')}` +
+      (missing.length > 5 ? `\n…and ${missing.length - 5} more` : '') +
+      `\n\nCheck that the Drug ID (${drugId}), Plate (${plateNum}), and Format are correct.`
+    );
+  }
+
+  // ── Process rows ─────────────────────────────────────────────
+  // First pass: collect all valid genes with their data
+  const geneMap = new Map(); // gene → best row (most valid intensities)
+
+  for (const row of dataRows) {
+    const rawGene = geneCol >= 0 ? (row[geneCol] ?? '') : '';
+    let gene = String(rawGene).split(';')[0].trim();
+    if (!gene || gene === 'nan' || gene === 'null' || gene === 'undefined') continue;
+
+    const allCols = [...dmsoCols, ...treatCols];
+    const nValid  = allCols.filter(ci => { const v = parseFloat(row[ci]); return isFinite(v) && v > 0; }).length;
+
+    // Deduplication: keep row with most valid intensities (mirrors Python)
+    if (!geneMap.has(gene) || nValid > geneMap.get(gene).nValid) {
+      geneMap.set(gene, { row, nValid });
+    }
+  }
+
+  // Second pass: normalise and fit
+  const results = [];
+  const doseMinGuard = Math.min(...dosesNm) * 0.1;
+  const doseMaxGuard = Math.max(...dosesNm) * 10;
+
+  for (const [gene, { row }] of geneMap) {
+    const protId = protCol >= 0 ? String(row[protCol] ?? '').split(';')[0].trim() : '';
+
+    // DMSO mean (zeros treated as NaN, mirrors Python)
+    const dmsoVals = dmsoCols.map(ci => {
+      const v = parseFloat(row[ci]);
+      return (isFinite(v) && v > 0) ? v : NaN;
+    });
+    const dmsoMean = nanMean(dmsoVals);
+    if (!isFinite(dmsoMean) || dmsoMean <= 0) continue;
+
+    // Relative intensities (treatment / mean DMSO)
+    const relVals = treatCols.map(ci => {
+      const v = parseFloat(row[ci]);
+      return (isFinite(v) && v > 0) ? v / dmsoMean : NaN;
+    });
+
+    const validMask = relVals.map(v => isFinite(v));
+    const nValid    = validMask.filter(Boolean).length;
+    if (nValid < minValidPts) continue;
+
+    const validDoses = dosesNm.filter((_, i) => validMask[i]);
+    const validRel   = relVals.filter(v => isFinite(v));
+
+    // Fit LL.4
+    const fitRes = fitLL4(validDoses, validRel, { doseMinGuard, doseMaxGuard, minEffect });
+    if (!fitRes.success) continue;
+
+    const { slope, bottom, top, ec50 } = fitRes.params;
+
+    // R² (on valid points only)
+    const fitted  = validDoses.map(d => ll4(d, slope, bottom, top, ec50));
+    const meanR   = validRel.reduce((a, b) => a + b) / validRel.length;
+    const ssRes   = validRel.reduce((s, v, i) => s + (v - fitted[i]) ** 2, 0);
+    const ssTot   = validRel.reduce((s, v)    => s + (v - meanR)     ** 2, 0);
+    const r2      = ssTot > 0 ? 1 - ssRes / ssTot : NaN;
+
+    if (!isFinite(r2) || r2 < minR2) continue;
+
+    // Fold change at max dose (predicted)
+    const fcMax = ll4(Math.max(...dosesNm), slope, bottom, top, ec50);
+    const isUp   = fcMax > fcUp;
+    const isDown = fcMax < fcDown;
+
+    const pec50 = 9.0 - Math.log10(ec50);
+    const auc   = computeAUC(slope, bottom, top, ec50,
+                             Math.log10(Math.min(...dosesNm)),
+                             Math.log10(Math.max(...dosesNm)));
+
+    results.push({
+      gene,
+      protein_id: protId,
+      ec50_nM:   r3(ec50),
+      pec50:     r3(pec50),
+      slope:     r3(slope),
+      top:       r3(top),
+      bottom:    r3(bottom),
+      r2:        r4(r2),
+      auc:       r4(auc),
+      fc_max:    r3(fcMax),
+      direction: isUp ? 'up' : (isDown ? 'down' : 'none'),
+      regulated: isUp || isDown,
+      n_valid:   nValid,
+      rel_intensities: relVals.map(v => isFinite(v) ? r4(v) : null),
+    });
+  }
+
+  return results;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RUN ANALYSIS (orchestrator)
+// ═══════════════════════════════════════════════════════════════
+async function runAnalysis() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Running…';
+  setRunStatus('');
+
+  try {
+    // ── Validate inputs ──────────────────────────────────────────
+    if (!S.proteinFile) throw new Error('Please upload a protein data file first.');
+
+    const drugName = document.getElementById('drug-name-input').value.trim();
+    if (!drugName)  throw new Error('Please enter a drug name.');
+
+    const format   = document.getElementById('format-select').value;
+    const settings = getSettings();
+    if (!settings.dosesNm.length) throw new Error('Invalid doses — check advanced settings.');
+
+    // ── Resolve drug ID + plate number ───────────────────────────
+    let drugId   = document.getElementById('drug-id-input').value.trim();
+    let plateNum = parseInt(document.getElementById('plate-num-input').value.trim());
+
+    // If not manually set, try mapping sheet
+    if ((!drugId || !plateNum) && S.parsedMapping) {
+      const { resolved } = resolveDrugFromMapping(drugName);
+      if (resolved) { drugId = resolved.drugId; plateNum = resolved.plateNum; }
+    }
+
+    if (!drugId)             throw new Error('Drug ID is unknown. Upload a mapping sheet or enter it manually.');
+    if (!plateNum || isNaN(plateNum)) throw new Error('Plate number is unknown. Upload a mapping sheet or enter it manually.');
+
+    document.getElementById('drug-tag').textContent = drugName;
+
+    // ── Parse protein file ───────────────────────────────────────
+    setRunStatus('info', '⟳ Parsing protein file…');
+    const parsed = await parseProteinFile(S.proteinFile, format);
+
+    // ── Run fitting pipeline ─────────────────────────────────────
+    setRunStatus('info', `⟳ Fitting LL.4 curves… (${parsed.dataRows.length} rows)`);
+
+    // Yield to the browser to repaint status before blocking computation
+    await new Promise(res => setTimeout(res, 20));
+
+    const results = runPipeline(parsed, drugId, plateNum, format, drugName, settings);
+
+    if (!results.length)
+      throw new Error('No proteins passed quality filters. Check drug ID, plate number, and thresholds.');
+
+    // ── Load results into UI ─────────────────────────────────────
+    loadResults(results, drugName);
+    const up   = results.filter(r => r.direction === 'up').length;
+    const down = results.filter(r => r.direction === 'down').length;
+    setRunStatus('ok', `✓ ${results.length} proteins fitted  (↑${up} up · ↓${down} down)`);
+
+  } catch(err) {
+    setRunStatus('error', '✕ ' + err.message);
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '▶ Run Analysis';
+}
+
+function setRunStatus(type, msg) {
+  const el = document.getElementById('run-status');
+  if (!msg) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'block';
+  el.innerHTML = `<div class="status-banner status-${type}" style="font-size:11px;">${msg}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOAD RESULTS INTO UI
+// ═══════════════════════════════════════════════════════════════
+function loadResults(results, drugName) {
+  S.results      = results;
+  S.analysisRan  = true;
+  S.selectedIdx  = null;
+  S.filteredRows = [];
+
+  populateGeneSelect();
+  filterTable();
+
+  if (results.length > 0) selectGeneByIndex(0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GENE NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function populateGeneSelect() {
+  const sel = document.getElementById('gene-select');
+  sel.innerHTML = S.results.map((r, i) => {
+    const arrow = r.direction === 'up' ? '↑' : r.direction === 'down' ? '↓' : '–';
+    return `<option value="${i}">${r.gene} (${arrow})</option>`;
+  }).join('');
+}
+
+function selectGeneByIndex(idx) {
+  idx = parseInt(idx);
+  if (isNaN(idx) || idx < 0 || idx >= S.results.length) return;
+  S.selectedIdx = idx;
+
+  document.getElementById('gene-select').value     = idx;
+  document.getElementById('prev-btn').disabled     = idx <= 0;
+  document.getElementById('next-btn').disabled     = idx >= S.results.length - 1;
+  document.getElementById('gene-counter').textContent = `${idx + 1} / ${S.results.length}`;
+
+  const row = S.results[idx];
+  const dosesNm = getSettings().dosesNm;
+  renderPlot(row, dosesNm);
+  renderMetrics(row);
+
+  // Sync table highlight
+  document.querySelectorAll('#table-body tr').forEach(tr =>
+    tr.classList.toggle('selected', parseInt(tr.dataset.idx) === idx));
+  const activeRow = document.querySelector(`#table-body tr[data-idx="${idx}"]`);
+  if (activeRow) activeRow.scrollIntoView({ block: 'nearest' });
+}
+
+function navigateGene(dir) {
+  const next = (S.selectedIdx ?? -1) + dir;
+  if (next >= 0 && next < S.results.length) selectGeneByIndex(next);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLOT
+// ═══════════════════════════════════════════════════════════════
+function renderPlot(row, dosesNm) {
+  const logDoses   = dosesNm.map(d => Math.log10(d));
+  const logPlotMin = logDoses[0]                    - 0.3;
+  const logPlotMax = logDoses[logDoses.length - 1]  + 0.3;
+
+  document.getElementById('plot-placeholder').style.display = 'none';
+  document.getElementById('plot-container').style.display   = 'flex';
+
+  if (S.chart) { S.chart.destroy(); S.chart = null; }
+
+  // Fitted curve (300 points)
+  const nPts       = 300;
+  const curveData  = [];
+  for (let i = 0; i < nPts; i++) {
+    const lx = logPlotMin + (logPlotMax - logPlotMin) * i / (nPts - 1);
+    curveData.push({ x: lx, y: ll4(Math.pow(10, lx), row.slope, row.bottom, row.top, row.ec50_nM) });
+  }
+
+  // Observed scatter
+  const obsData = dosesNm
+    .map((d, i) => row.rel_intensities[i] != null ? { x: Math.log10(d), y: row.rel_intensities[i] } : null)
+    .filter(Boolean);
+
+  const isUp   = row.direction === 'up';
+  const isDown = row.direction === 'down';
+  const curveCol = isUp ? '#dc2626' : isDown ? '#2563eb' : '#6b7280';
+  const pointCol = isUp ? '#ef4444' : isDown ? '#3b82f6' : '#9ca3af';
+
+  const ctx = document.getElementById('drc-chart').getContext('2d');
+  S.chart = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: 'Fitted curve', type: 'line', data: curveData,
+          borderColor: curveCol, borderWidth: 2, pointRadius: 0, fill: false, tension: 0, order: 2 },
+        { label: 'Observed', type: 'scatter', data: obsData,
+          backgroundColor: pointCol, pointRadius: 5, pointHoverRadius: 7, order: 1 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 180 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const lx = ctx.raw.x;
+              return ` ${Math.pow(10, lx).toFixed(1)} nM → ${ctx.raw.y.toFixed(3)}`;
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            refLine: { type: 'line', yMin: 1, yMax: 1,
+              borderColor: '#d1d5db', borderWidth: 1, borderDash: [4, 3] },
+            ec50Line: { type: 'line',
+              xMin: Math.log10(row.ec50_nM), xMax: Math.log10(row.ec50_nM),
+              borderColor: curveCol, borderWidth: 1, borderDash: [3, 3], borderOpacity: 0.5 },
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: 'Concentration (nM)', font: { size: 11 }, color: '#5a6272' },
+          ticks: {
+            values: logDoses,
+            callback: val => {
+              const idx = logDoses.findIndex(v => Math.abs(v - val) < 0.01);
+              return idx >= 0 ? dosesNm[idx] : '';
+            },
+            font: { size: 11 }
+          },
+          grid: { color: '#f3f4f6' },
+          min: logPlotMin, max: logPlotMax,
+        },
+        y: {
+          title: { display: true, text: 'Relative intensity (treatment / mean DMSO)', font: { size: 11 }, color: '#5a6272' },
+          ticks: { font: { size: 11 } },
+          grid: { color: '#f3f4f6' },
+        }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  METRICS PANEL
+// ═══════════════════════════════════════════════════════════════
+function renderMetrics(row) {
+  document.getElementById('metrics-empty').style.display   = 'none';
+  document.getElementById('metrics-content').style.display = 'block';
+
+  const dirCls  = row.direction === 'up' ? 'up' : row.direction === 'down' ? 'down' : 'none';
+  const chipCls = row.direction === 'up' ? 'chip-up' : row.direction === 'down' ? 'chip-down' : 'chip-none';
+  const chipTxt = row.direction === 'up' ? '↑ Up-regulated' : row.direction === 'down' ? '↓ Down-regulated' : '– Unregulated';
+
+  document.getElementById('gene-header-card').innerHTML = `
+    <div class="gene-header ${dirCls}">
+      <div class="gene-name">${row.gene}</div>
+      <div class="gene-prot">${row.protein_id}</div>
+      <span class="direction-chip ${chipCls}">${chipTxt}</span>
+    </div>`;
+
+  const sb = document.getElementById('fit-status-badge');
+  sb.className = 'fit-badge ' + (row.r2 >= 0.9 ? 'fit-ok' : 'fit-warn');
+  sb.textContent = row.r2 >= 0.9
+    ? `✓ Good fit  (R² = ${row.r2.toFixed(3)})`
+    : `⚠ Acceptable fit  (R² = ${row.r2.toFixed(3)})`;
+
+  document.getElementById('m-ec50').textContent   = `${row.ec50_nM.toFixed(1)} nM`;
+  document.getElementById('m-pec50').textContent  = row.pec50.toFixed(3);
+  document.getElementById('m-slope').textContent  = row.slope.toFixed(3);
+  document.getElementById('m-top').textContent    = row.top.toFixed(3);
+  document.getElementById('m-bottom').textContent = row.bottom.toFixed(3);
+  document.getElementById('m-auc').textContent    = row.auc.toFixed(4);
+  document.getElementById('m-fc').textContent     = row.fc_max.toFixed(3);
+  document.getElementById('m-npts').textContent   = `${row.n_valid} / ${getSettings().dosesNm.length}`;
+
+  const r2El = document.getElementById('m-r2');
+  r2El.textContent = row.r2.toFixed(4);
+  r2El.className   = 'metric-value ' + (row.r2 >= 0.95 ? 'good' : row.r2 >= 0.8 ? 'warn' : 'bad');
+
+  const pct = Math.round(row.r2 * 100);
+  document.getElementById('r2-bar-fill').style.cssText =
+    `width:${pct}%;background:${row.r2>=0.95?'var(--success)':row.r2>=0.8?'var(--warn)':'var(--error)'}`;
+
+  const conf = Math.min(100, Math.round(
+    row.r2 * 60 + (row.n_valid / getSettings().dosesNm.length) * 25 + (row.regulated ? 15 : 0)
+  ));
+  const confColor = conf >= 85 ? 'var(--success)' : conf >= 65 ? 'var(--warn)' : 'var(--error)';
+  document.getElementById('conf-fill').style.cssText = `width:${conf}%;background:${confColor}`;
+  document.getElementById('conf-label').textContent  =
+    conf >= 85 ? `High (${conf}%)` : conf >= 65 ? `Medium (${conf}%)` : `Low (${conf}%)`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TABLE
+// ═══════════════════════════════════════════════════════════════
+function filterTable() {
+  const query  = (document.getElementById('table-search').value || '').toLowerCase();
+  const dirFlt = document.getElementById('filter-dir').value;
+  S.filteredRows = S.results.filter(r => {
+    const matchText = !query
+      || r.gene.toLowerCase().includes(query)
+      || r.protein_id.toLowerCase().includes(query);
+    const matchDir  = dirFlt === 'all' || r.direction === dirFlt;
+    return matchText && matchDir;
+  });
+  renderTable();
+  updateTableCount();
+}
+
+function sortTable(col) {
+  state_sortBy(col);
+  filterTable();
+}
+
+function state_sortBy(col) {
+  if (S.sortCol === col) S.sortAsc = !S.sortAsc;
+  else { S.sortCol = col; S.sortAsc = true; }
+  document.querySelectorAll('thead th').forEach(th => {
+    const sorted = th.dataset.col === col;
+    th.classList.toggle('sorted', sorted);
+    const icon = th.querySelector('.sort-icon');
+    if (icon) icon.textContent = !sorted ? '↕' : S.sortAsc ? '↑' : '↓';
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  const table = document.getElementById('results-table');
+  const empty = document.getElementById('table-empty');
+
+  if (!S.analysisRan) return;
+
+  const rows = [...S.filteredRows].sort((a, b) => {
+    const av = a[S.sortCol], bv = b[S.sortCol];
+    const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv));
+    return S.sortAsc ? cmp : -cmp;
+  });
+
+  if (!rows.length) {
+    table.style.display = 'none';
+    empty.textContent   = 'No results match the current filter';
+    empty.style.display = 'block';
+    return;
+  }
+
+  table.style.display = '';
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(r => {
+    const origIdx  = S.results.indexOf(r);
+    const dirCls   = r.direction === 'up' ? 'dir-up' : r.direction === 'down' ? 'dir-down' : 'dir-none';
+    const dirLabel = r.direction === 'up' ? '↑ Up' : r.direction === 'down' ? '↓ Down' : '–';
+    const r2Cls    = r.r2 >= 0.95 ? 'good' : r.r2 >= 0.8 ? 'ok' : '';
+    return `<tr data-idx="${origIdx}" class="${S.selectedIdx === origIdx ? 'selected' : ''}"
+              onclick="selectGeneByIndex(${origIdx})">
+      <td class="gene-cell">${r.gene}</td>
+      <td style="color:var(--text2);font-size:10.5px;">${r.protein_id}</td>
+      <td><span class="dir-badge ${dirCls}">${dirLabel}</span></td>
+      <td>${r.ec50_nM.toFixed(1)}</td>
+      <td>${r.pec50.toFixed(3)}</td>
+      <td>${r.slope.toFixed(3)}</td>
+      <td class="r2-cell ${r2Cls}">${r.r2.toFixed(4)}</td>
+      <td>${r.auc.toFixed(4)}</td>
+      <td>${r.fc_max.toFixed(3)}</td>
+      <td>${r.n_valid}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateTableCount() {
+  document.getElementById('table-count').textContent =
+    S.analysisRan ? `${S.filteredRows.length} of ${S.results.length} proteins` : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORT CSV
+// ═══════════════════════════════════════════════════════════════
+function exportCSV() {
+  if (!S.results.length) { alert('Run analysis first.'); return; }
+  const cols = ['gene','protein_id','direction','ec50_nM','pec50','slope','top','bottom','r2','auc','fc_max','n_valid'];
+  const data = S.filteredRows.length ? S.filteredRows : S.results;
+  const csv  = [cols.join(','), ...data.map(r => cols.map(c => JSON.stringify(r[c] ?? '')).join(','))].join('\n');
+  const drug = document.getElementById('drug-name-input').value.trim() || 'results';
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `drc_${drug.replace(/\s+/g, '_')}.csv`;
+  a.click();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ACCORDION
+// ═══════════════════════════════════════════════════════════════
+function toggleAccordion() {
+  const body  = document.getElementById('adv-settings');
+  const arrow = document.getElementById('acc-arrow');
+  const label = document.getElementById('acc-label');
+  const open  = body.classList.toggle('open');
+  arrow.textContent = open ? '▾' : '▸';
+  label.textContent = open ? 'Hide advanced settings' : 'Show advanced settings';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   navigateGene(-1);
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown')  navigateGene(1);
+});
+</script>
+</body>
+</html>
