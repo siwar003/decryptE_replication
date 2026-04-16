@@ -593,14 +593,12 @@ function nelderMead(costFn, x0, opts = {}) {
 // Returns { success, params } or { success: false, reason }
 // Mirrors Python fit_ll4: tries both slope signs, takes best cost
 function fitLL4(doses, responses, opts = {}) {
-  const doseMinGuard = opts.doseMinGuard ?? Math.min(...doses) * 0.0001;
-  const doseMaxGuard = opts.doseMaxGuard ?? Math.max(...doses) * 10000;
-  const minEffect    = opts.minEffect    ?? 0.15;
+  const minEffect = opts.minEffect ?? 0.15;
 
   const minDoseIdx = doses.indexOf(Math.min(...doses));
   const maxDoseIdx = doses.indexOf(Math.max(...doses));
-  const top0    = responses[minDoseIdx];   // response at lowest dose ≈ top
-  const bottom0 = responses[maxDoseIdx];   // response at highest dose ≈ bottom
+  const top0    = responses[minDoseIdx];
+  const bottom0 = responses[maxDoseIdx];
   const ec50_0  = Math.sqrt(Math.min(...doses) * Math.max(...doses));
   const slope0  = bottom0 < top0 ? -1 : 1;
 
@@ -617,12 +615,17 @@ function fitLL4(doses, responses, opts = {}) {
   let best = null;
   let bestCost = Infinity;
 
-  // Try both slope signs (mirrors Python's two-sign loop)
   for (const s0 of [slope0, -slope0]) {
     try {
-      const res = nelderMead(costFn, [s0, bottom0, top0, ec50_0], { maxIter: 3000, tol: 1e-12 });
-      if (res.fval < bestCost) { bestCost = res.fval; best = res.x; }
-    } catch(e) { /* skip */ }
+      const res = nelderMead(costFn, [s0, bottom0, top0, ec50_0], {
+        maxIter: 3000,
+        tol: 1e-12
+      });
+      if (res.fval < bestCost) {
+        bestCost = res.fval;
+        best = res.x;
+      }
+    } catch (e) {}
   }
 
   if (!best) return { success: false, reason: 'optimization failed' };
@@ -631,10 +634,9 @@ function fitLL4(doses, responses, opts = {}) {
 
   if (!isFinite(ec50) || ec50 <= 0)
     return { success: false, reason: `EC50 not finite (${ec50})` };
-  if (ec50 < doseMinGuard || ec50 > doseMaxGuard)
-    return { success: false, reason: `EC50 out of range (${r3(ec50)} nM)` };
+
   if (Math.abs(top - bottom) < minEffect)
-    return { success: false, reason: `flat curve |top-bottom|=${Math.abs(top-bottom).toFixed(3)}` };
+    return { success: false, reason: `flat curve |top-bottom|=${Math.abs(top - bottom).toFixed(3)}` };
 
   return { success: true, params: { slope, bottom, top, ec50 } };
 }
@@ -949,12 +951,10 @@ function runPipeline(parsed, drugId, plateNum, format, drugName, settings) {
     }
   }
 
-  // Second pass: normalise and fit
-  const results = [];
-  const doseMinGuard = Math.min(...dosesNm) * 0.1;
-  const doseMaxGuard = Math.max(...dosesNm) * 10;
+ // Second pass: normalise and fit
+const results = [];
 
-  for (const [gene, { row }] of geneMap) {
+for (const [gene, { row }] of geneMap) {
     const protId = protCol >= 0 ? String(row[protCol] ?? '').split(';')[0].trim() : '';
 
     // DMSO mean (zeros treated as NaN, mirrors Python)
@@ -979,7 +979,7 @@ function runPipeline(parsed, drugId, plateNum, format, drugName, settings) {
     const validRel   = relVals.filter(v => isFinite(v));
 
     // Fit LL.4
-    const fitRes = fitLL4(validDoses, validRel, { doseMinGuard, doseMaxGuard, minEffect });
+    const fitRes = fitLL4(validDoses, validRel, { minEffect });
     if (!fitRes.success) continue;
 
     const { slope, bottom, top, ec50 } = fitRes.params;
@@ -1004,21 +1004,22 @@ function runPipeline(parsed, drugId, plateNum, format, drugName, settings) {
                              Math.log10(Math.max(...dosesNm)));
 
     results.push({
-      gene,
-      protein_id: protId,
-      ec50_nM:   r3(ec50),
-      pec50:     r3(pec50),
-      slope:     r3(slope),
-      top:       r3(top),
-      bottom:    r3(bottom),
-      r2:        r4(r2),
-      auc:       r4(auc),
-      fc_max:    r3(fcMax),
-      direction: isUp ? 'up' : (isDown ? 'down' : 'none'),
-      regulated: isUp || isDown,
-      n_valid:   nValid,
-      rel_intensities: relVals.map(v => isFinite(v) ? r4(v) : null),
-    });
+  gene,
+  protein_id: protId,
+  ec50_nM:   r3(ec50),
+  pec50:     r3(pec50),
+  slope:     r3(slope),
+  top:       r3(top),
+  bottom:    r3(bottom),
+  r2:        r4(r2),
+  auc:       r4(auc),
+  fc_max:    r3(fcMax),
+  direction: isUp ? 'up' : (isDown ? 'down' : 'none'),
+  regulated: isUp || isDown,
+  n_valid:   nValid,
+  ec50_extrapolated: ec50Extrapolated,
+  rel_intensities: relVals.map(v => isFinite(v) ? r4(v) : null),
+});
   }
 
   return results;
