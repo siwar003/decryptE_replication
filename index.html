@@ -1002,8 +1002,11 @@ for (const [gene, { row }] of geneMap) {
     const auc   = computeAUC(slope, bottom, top, ec50,
                              Math.log10(Math.min(...dosesNm)),
                              Math.log10(Math.max(...dosesNm)));
+    const testedMinDose = Math.min(...dosesNm);
+    const testedMaxDose = Math.max(...dosesNm);
+    const ec50Extrapolated = ec50 < testedMinDose || ec50 > testedMaxDose;
 
-    results.push({
+   results.push({
   gene,
   protein_id: protId,
   ec50_nM:   r3(ec50),
@@ -1017,7 +1020,7 @@ for (const [gene, { row }] of geneMap) {
   direction: isUp ? 'up' : (isDown ? 'down' : 'none'),
   regulated: isUp || isDown,
   n_valid:   nValid,
-  ec50_extrapolated: ec50Extrapolated,
+  ec50_extrapolated: ec50Extrapolated,   // ← now defined
   rel_intensities: relVals.map(v => isFinite(v) ? r4(v) : null),
 });
   }
