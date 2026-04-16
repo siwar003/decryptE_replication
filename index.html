@@ -593,8 +593,8 @@ function nelderMead(costFn, x0, opts = {}) {
 // Returns { success, params } or { success: false, reason }
 // Mirrors Python fit_ll4: tries both slope signs, takes best cost
 function fitLL4(doses, responses, opts = {}) {
-  const doseMinGuard = opts.doseMinGuard ?? Math.min(...doses) * 0.1;
-  const doseMaxGuard = opts.doseMaxGuard ?? Math.max(...doses) * 10;
+  const doseMinGuard = opts.doseMinGuard ?? Math.min(...doses) * 0.0001;
+  const doseMaxGuard = opts.doseMaxGuard ?? Math.max(...doses) * 10000;
   const minEffect    = opts.minEffect    ?? 0.15;
 
   const minDoseIdx = doses.indexOf(Math.min(...doses));
