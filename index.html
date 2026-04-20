@@ -593,8 +593,6 @@ function nelderMead(costFn, x0, opts = {}) {
 }
 
 function fitLL4(doses, responses, opts = {}) {
-  const doseMinGuard = opts.doseMinGuard ?? Math.min(...doses) * 0.1;
-  const doseMaxGuard = opts.doseMaxGuard ?? Math.max(...doses) * 10;
   const minEffect    = opts.minEffect    ?? 0.15;
   const minIdx = doses.indexOf(Math.min(...doses));
   const maxIdx = doses.indexOf(Math.max(...doses));
@@ -624,7 +622,6 @@ function fitLL4(doses, responses, opts = {}) {
 
   const [slope, bottom, top, ec50] = best;
   if (!Number.isFinite(ec50) || ec50 <= 0)          return { success: false, reason: `EC50 not finite (${ec50})` };
-  if (ec50 < doseMinGuard || ec50 > doseMaxGuard)   return { success: false, reason: `EC50 out of range (${r3(ec50)} nM)` };
   if (Math.abs(top - bottom) < minEffect)           return { success: false, reason: `flat curve |Δ|=${Math.abs(top-bottom).toFixed(3)}` };
   return { success: true, params: { slope, bottom, top, ec50 } };
 }
@@ -1246,7 +1243,7 @@ function runPipeline(parsed, config, settings) {
     const validDoses = treatCols.map(t => t.dose).filter((_, i) => validMask[i]);
     const validResp  = relVals.filter(v => Number.isFinite(v));
 
-    const fit = fitLL4(validDoses, validResp, { doseMinGuard, doseMaxGuard, minEffect: settings.minEffect });
+    const fit = fitLL4(validDoses, validResp, { minEffect: settings.minEffect });
     if (!fit.success) continue;
 
     const { slope, bottom, top, ec50 } = fit.params;
@@ -1266,6 +1263,9 @@ function runPipeline(parsed, config, settings) {
                               Math.log10(Math.max(...dosesNm)));
 
     const sampleText = sampleCol >= 0 ? String(row[sampleCol] ?? '').trim() : '';
+    const minDose = Math.min(...dosesNm);
+    const maxDose = Math.max(...dosesNm);
+    const ec50Extrapolated = ec50 < minDose || ec50 > maxDose;
 
     results.push({
       row_index: rowIndex,
@@ -1276,6 +1276,7 @@ function runPipeline(parsed, config, settings) {
       protein_aliases: proteinAliases.join('; '),
       search_text: [gene, ...geneAliases, ...proteinAliases, sampleText].join(' ').toLowerCase(),
       ec50_nM: r3(ec50),
+      ec50_extrapolated: ec50Extrapolated,
       pec50:   r3(pec50),
       slope:   r3(slope),
       top:     r3(top),
@@ -1444,7 +1445,7 @@ function renderMetrics(row) {
     ? `✓ Good fit (R² = ${row.r2.toFixed(3)})`
     : `⚠ Acceptable fit (R² = ${row.r2.toFixed(3)})`;
 
-  document.getElementById('m-ec50').textContent   = `${row.ec50_nM.toFixed(2)} nM`;
+  document.getElementById('m-ec50').textContent   = `${row.ec50_nM.toFixed(2)} nM${row.ec50_extrapolated ? ' (extrap)' : ''}`;
   document.getElementById('m-pec50').textContent  = row.pec50.toFixed(3);
   document.getElementById('m-slope').textContent  = row.slope.toFixed(3);
   document.getElementById('m-top').textContent    = row.top.toFixed(3);
@@ -1542,7 +1543,7 @@ function renderTable() {
       <td style="color:var(--muted);font-size:10.5px;">${escapeHtml(r.protein_id)}</td>
       <td class="${showSample ? '' : 'hidden'}">${escapeHtml(r.sample_name)}</td>
       <td><span class="dir-badge ${dirCls}">${dirLabel}</span></td>
-      <td>${r.ec50_nM.toFixed(2)}</td>
+      <td>${r.ec50_nM.toFixed(2)}${r.ec50_extrapolated ? ' <span style="color:var(--warn);font-size:10px;font-weight:600;">extrap</span>' : ''}</td>
       <td>${r.pec50.toFixed(3)}</td>
       <td>${r.slope.toFixed(3)}</td>
       <td>${r.r2.toFixed(4)}</td>
