@@ -316,7 +316,10 @@
                 <option value="drug_concentration" selected>Drug concentration</option>
                 <option value="percent_solvent">Percent solvent</option>
                 <option value="temperature">Temperature</option>
-                <option value="exposure_time">Ligand binding</option>
+                <option value="exposure_time">Exposure time</option>
+                <option value="salt_concentration">Salt concentration</option>
+                <option value="cytokine_concentration">Cytokine concentration</option>
+                <option value="nanoparticle_concentration">Nanoparticle concentration</option>
                 <option value="other">Other</option>
               </select>
             </div>
@@ -477,6 +480,23 @@
               <label class="form-label" id="default-values-label">Default perturbation values for auto-build</label>
               <input id="s-doses" class="text-input" type="text" value="1,10,100,1000,10000"/>
             </div>
+          </div>
+
+          <!-- ───────── ML calibration (optional, benchmark-trained) ───────── -->
+          <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:#fcfcfd;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <input id="s-mlcal" type="checkbox" style="margin:0;"/>
+              <label for="s-mlcal" style="font-size:12px;font-weight:600;cursor:pointer;">
+                Apply ML calibration to FC/AUC
+                <span style="font-weight:500;color:var(--muted);font-size:10.5px;">(optional · benchmark-trained)</span>
+              </label>
+            </div>
+            <p style="margin:6px 0 0 22px;font-size:10.5px;color:var(--muted);line-height:1.4;">
+              ML calibration adjusts FC/AUC to better match the decryptE benchmark style.
+              Raw LL.4-derived values are retained and recommended as the default for new biological datasets.
+              Model: <code>drug_level_residual</code> (λ = 1.00). Does not affect pEC50 or the fitted curve.
+            </p>
+            <p id="ml-cal-status" style="margin:6px 0 0 22px;font-size:10.5px;color:var(--warn);display:none;line-height:1.4;"></p>
           </div>
         </div>
       </div>
@@ -1168,6 +1188,7 @@ function getSettings() {
     fcDown:       parseFloat(document.getElementById('s-fcdn').value)    || 0.7,
     minEffect:    parseFloat(document.getElementById('s-mineff').value)  || 0.15,
     optimizer:    document.getElementById('optimizer-select')?.value || 'bfgs',
+    mlCalibrate:  !!document.getElementById('s-mlcal')?.checked,
   };
 }
 
@@ -2279,7 +2300,226 @@ async function runAnalysis() {
   btn.innerHTML = '▶ Run analysis';
 }
 
+/* =============================================================
+ *  ML CALIBRATION  (optional, benchmark-trained)
+ *
+ *  This is a *post-hoc* correction layer that runs AFTER the LL.4
+ *  fit and AFTER raw FC/AUC are computed. It does NOT change:
+ *    - the LL.4 curve
+ *    - pEC50
+ *    - the raw FC/AUC values (those are preserved as fc_raw / auc_raw)
+ *
+ *  Winning model on the decryptE benchmark (LODO):
+ *      drug_level_residual, lambda = 1.00
+ *  i.e.   log2_fc_calibrated = log2(fc_raw)  +  λ · predicted_log2_fc_residual
+ *         auc_calibrated     = auc_raw       +  λ · predicted_auc_residual
+ *  where the residuals are predicted PER DRUG (not per protein) from
+ *  drug-level summary features (median pec50, median log2 fc, IQR,
+ *  fraction up/down/none, n curves, …).
+ *
+ *  ────────────────────────────────────────────────────────────────
+ *  TRAINED-MODEL ARTIFACT REQUIRED (not yet embedded)
+ *  ────────────────────────────────────────────────────────────────
+ *  To make the calibration actually run in-browser, fill in
+ *  ML_CALIBRATION_MODEL.predict() below with one of:
+ *
+ *  (A) Per-drug lookup table.  Easiest for the decryptE benchmark
+ *      because the held-out predictions are already saved at
+ *        ml_calibration_results/correlation_preserving_calibration/
+ *          per_drug_model_selection.csv
+ *      Export a small JSON {drug_normalized → {log2_fc_residual,
+ *      auc_residual}} from Python and assign it to
+ *      ML_CALIBRATION_MODEL.lookup.  Calibration is then a name
+ *      lookup against the drug-name field.
+ *
+ *  (B) Generalizable meta-model.  Export the trained
+ *      RandomForestRegressor from _drug_level_residual_predict()
+ *      to a portable form (e.g. via sklearn-porter or a hand-rolled
+ *      JSON of {feature_thresholds, leaf_values} for each tree),
+ *      then implement a small forest-evaluator inside predict().
+ *      This works for arbitrary new drugs.
+ *
+ *  Until one of those is in place, predict() returns zeros and the
+ *  toggle becomes a no-op (calibrated == raw) plus a UI warning.
+ * ============================================================ */
+const ML_CALIBRATION_MODEL = {
+  name:   'drug_level_residual_lambda1.00',
+  lambda: 1.00,
+  // (A) Per-drug lookup. Populate with the residuals for known drugs:
+  //     { 'apabetalone': { log2_fc_residual: -0.12, auc_residual: -0.02 }, ... }
+  lookup: null,           // ← assign your exported JSON here
+  // (B) Forest meta-model artifact. Set to an object with a
+  //     `predict(featureVector)` method that returns
+  //     { log2_fc_residual, auc_residual } for unknown drugs.
+  forest: null,           // ← assign your exported tree ensemble here
+
+  /** Normalize drug name for lookup matching (matches the Python
+   *  helper of the same name in ml_calibration.py). */
+  normDrug(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  },
+
+  /** Compute per-drug summary features from the current results.
+   *  These match the DRUG_FEATURES list used to train the meta-RF in
+   *  ml_calibration.py — keep this in sync if the training features
+   *  change. */
+  drugSummary(results) {
+    const num = (xs) => xs.map(Number).filter(Number.isFinite);
+    const median = (xs) => {
+      const v = num(xs).slice().sort((a, b) => a - b);
+      if (!v.length) return 0;
+      const m = Math.floor(v.length / 2);
+      return v.length % 2 ? v[m] : 0.5 * (v[m - 1] + v[m]);
+    };
+    const quantile = (xs, q) => {
+      const v = num(xs).slice().sort((a, b) => a - b);
+      if (!v.length) return 0;
+      const i = Math.max(0, Math.min(v.length - 1, q * (v.length - 1)));
+      const lo = Math.floor(i), hi = Math.ceil(i);
+      return lo === hi ? v[lo] : v[lo] + (i - lo) * (v[hi] - v[lo]);
+    };
+    const fc        = results.map(r => r.fc_max);
+    const log2fc    = fc.map(v => (Number.isFinite(v) && v > 0) ? Math.log2(v) : NaN);
+    const auc       = results.map(r => r.auc);
+    const pec50     = results.map(r => r.pec50);
+    const r2        = results.map(r => r.r2);
+    const dirs      = results.map(r => String(r.direction || 'none').toLowerCase());
+    const n         = results.length || 1;
+    return {
+      median_pec50_mine:        median(pec50),
+      median_log2_fc_mine:      median(log2fc),
+      median_abs_log2_fc_mine:  median(log2fc.map(v => Math.abs(v))),
+      median_auc_mine:          median(auc),
+      median_r_mine:            median(r2),  // fit R² stands in for curve-quality r
+      iqr_log2_fc_mine:         quantile(log2fc, 0.75) - quantile(log2fc, 0.25),
+      iqr_auc_mine:             quantile(auc,    0.75) - quantile(auc,    0.25),
+      frac_up:    dirs.filter(d => d === 'up').length / n,
+      frac_down:  dirs.filter(d => d === 'down').length / n,
+      frac_none:  dirs.filter(d => d === 'none').length / n,
+      n_curves:   results.length,
+    };
+  },
+
+  /** Predict { log2_fc_residual, auc_residual } for the current drug.
+   *  Returns nulls (no calibration) when no artifact is loaded. */
+  predict(drugName, summary) {
+    if (this.lookup) {
+      const key = this.normDrug(drugName);
+      const hit = this.lookup[key];
+      if (hit && Number.isFinite(hit.log2_fc_residual) && Number.isFinite(hit.auc_residual)) {
+        return {
+          log2_fc_residual: hit.log2_fc_residual,
+          auc_residual:     hit.auc_residual,
+          source:           'lookup',
+        };
+      }
+    }
+    if (this.forest && typeof this.forest.predict === 'function') {
+      try {
+        const out = this.forest.predict(summary);
+        if (out && Number.isFinite(out.log2_fc_residual) && Number.isFinite(out.auc_residual)) {
+          return { ...out, source: 'forest' };
+        }
+      } catch (e) {
+        console.warn('ML calibration forest.predict() failed:', e);
+      }
+    }
+    return { log2_fc_residual: null, auc_residual: null, source: 'unloaded' };
+  },
+};
+
+/** Annotate every result row with raw + calibrated FC/AUC columns.
+ *  Always runs after fitting; the caller decides which to display via
+ *  the toggle. When the toggle is OFF, fc_calibrated == fc_raw and the
+ *  deltas are 0 — that way export columns are stable across runs. */
+function applyMLCalibration(results, settings, drugName) {
+  const enabled = !!settings.mlCalibrate;
+  const statusEl = document.getElementById('ml-cal-status');
+  if (!results.length) {
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+    return results;
+  }
+
+  // Always populate the raw columns so they're available regardless of toggle.
+  for (const r of results) {
+    r.fc_raw  = r.fc_max;
+    r.auc_raw = r.auc;
+  }
+
+  if (!enabled) {
+    for (const r of results) {
+      r.fc_calibrated         = r.fc_raw;
+      r.auc_calibrated        = r.auc_raw;
+      r.fc_calibration_delta  = 0;
+      r.auc_calibration_delta = 0;
+      r.calibration_model     = 'none';
+    }
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+    return results;
+  }
+
+  // Toggle is ON — try to predict drug-level residuals.
+  const summary = ML_CALIBRATION_MODEL.drugSummary(results);
+  const pred = ML_CALIBRATION_MODEL.predict(drugName, summary);
+  const lam  = ML_CALIBRATION_MODEL.lambda;
+
+  if (pred.source === 'unloaded'
+      || pred.log2_fc_residual == null
+      || pred.auc_residual == null) {
+    // Structure is in place but no trained artifact has been embedded yet.
+    for (const r of results) {
+      r.fc_calibrated         = r.fc_raw;
+      r.auc_calibrated        = r.auc_raw;
+      r.fc_calibration_delta  = 0;
+      r.auc_calibration_delta = 0;
+      r.calibration_model     = ML_CALIBRATION_MODEL.name + ' (artifact_missing)';
+    }
+    if (statusEl) {
+      statusEl.style.display = '';
+      statusEl.textContent =
+        '⚠ ML calibration toggle is on, but no trained model artifact is loaded. '
+        + 'Calibrated columns equal raw values. Populate ML_CALIBRATION_MODEL.lookup '
+        + 'or .forest to enable. (See HTML comment above for instructions.)';
+    }
+    return results;
+  }
+
+  const fcResid  = lam * pred.log2_fc_residual;
+  const aucResid = lam * pred.auc_residual;
+  for (const r of results) {
+    if (Number.isFinite(r.fc_raw) && r.fc_raw > 0) {
+      const log2cal = Math.log2(r.fc_raw) + fcResid;
+      r.fc_calibrated        = r3(Math.pow(2, log2cal));
+      r.fc_calibration_delta = r3(r.fc_calibrated - r.fc_raw);
+    } else {
+      r.fc_calibrated        = r.fc_raw;
+      r.fc_calibration_delta = 0;
+    }
+    if (Number.isFinite(r.auc_raw)) {
+      r.auc_calibrated        = r4(r.auc_raw + aucResid);
+      r.auc_calibration_delta = r4(r.auc_calibrated - r.auc_raw);
+    } else {
+      r.auc_calibrated        = r.auc_raw;
+      r.auc_calibration_delta = 0;
+    }
+    r.calibration_model = ML_CALIBRATION_MODEL.name + ' (' + pred.source + ')';
+  }
+  if (statusEl) {
+    statusEl.style.display = '';
+    statusEl.style.color   = 'var(--good)';
+    statusEl.textContent   =
+      `✓ ML calibration applied: log2_fc residual = ${fcResid.toFixed(3)}, `
+      + `auc residual = ${aucResid.toFixed(4)}  (source: ${pred.source})`;
+  }
+  return results;
+}
+
 function loadResults(results, config) {
+  // Apply (or no-op) the ML calibration layer before storing results.
+  // Raw columns are always populated; the toggle decides what gets
+  // *displayed* in the table and right-panel metrics.
+  applyMLCalibration(results, getSettings(), config.drugName);
+
   S.results      = results;
   S.analysisRan  = true;
   S.selectedIdx  = null;
@@ -2455,8 +2695,15 @@ function renderMetrics(row) {
   document.getElementById('m-slope').textContent  = row.slope.toFixed(3);
   document.getElementById('m-top').textContent    = row.top.toFixed(3);
   document.getElementById('m-bottom').textContent = row.bottom.toFixed(3);
-  document.getElementById('m-auc').textContent    = row.auc.toFixed(4);
-  document.getElementById('m-fc').textContent     = row.fc_max.toFixed(3);
+  // Show calibrated value alongside raw when ML calibration is active and
+  // a trained artifact actually moved the value.
+  const calOn = !!getSettings().mlCalibrate && row.calibration_model && !/none|artifact_missing/.test(row.calibration_model);
+  const calBadge = (raw, cal, decimals) => {
+    if (!calOn || !Number.isFinite(cal) || Math.abs(cal - raw) < 1e-9) return raw.toFixed(decimals);
+    return `${raw.toFixed(decimals)} <span style="color:var(--muted);font-size:10.5px;">→</span> <span style="color:var(--good);">${cal.toFixed(decimals)}</span>`;
+  };
+  document.getElementById('m-auc').innerHTML = calBadge(row.auc, row.auc_calibrated, 4);
+  document.getElementById('m-fc').innerHTML  = calBadge(row.fc_max, row.fc_calibrated, 3);
   document.getElementById('m-ec50-status').textContent = row.midpoint_status || row.ec50_status || 'in_range';
   document.getElementById('m-confidence').textContent = row.confidence_label || '';
   document.getElementById('m-optimizer').textContent = row.optimizer_used || '';
@@ -2542,6 +2789,12 @@ function renderTable() {
   table.style.display = '';
   empty.style.display = 'none';
   const showSample = S.experimentType === 'lfq' && S.lfqMode === 'manual';
+  const calOn = !!getSettings().mlCalibrate
+                && rows.some(r => r.calibration_model && !/none|artifact_missing/.test(r.calibration_model));
+  const cell = (raw, cal, decimals) => {
+    if (!calOn || !Number.isFinite(cal) || Math.abs(cal - raw) < 1e-9) return raw.toFixed(decimals);
+    return `${raw.toFixed(decimals)} <span style="color:var(--muted);font-size:10px;">→</span> <span style="color:var(--good);font-weight:600;">${cal.toFixed(decimals)}</span>`;
+  };
   tbody.innerHTML = rows.map(r => {
     const origIdx = S.results.indexOf(r);
     const dirCls   = r.direction === 'up' ? 'dir-up' : r.direction === 'down' ? 'dir-down' : 'dir-none';
@@ -2559,8 +2812,8 @@ function renderTable() {
       <td>${escapeHtml(r.optimizer_used || '')}</td>
       <td>${r.slope.toFixed(3)}</td>
       <td>${r.r2.toFixed(4)}</td>
-      <td>${r.auc.toFixed(4)}</td>
-      <td>${r.fc_max.toFixed(3)}</td>
+      <td>${cell(r.auc,    r.auc_calibrated, 4)}</td>
+      <td>${cell(r.fc_max, r.fc_calibrated,  3)}</td>
       <td>${r.n_valid}</td>
       <td>${r.n_control_reps ?? ''}</td>
     </tr>`;
@@ -2575,10 +2828,18 @@ function updateTableCount() {
 function exportCSV() {
   if (!S.results.length) { alert('Run analysis first.'); return; }
   const hasPEC50 = S.results.some(r => r.pec50 != null);
+  const hasCalibration = S.results.some(r => r.calibration_model != null);
+  // Calibrated columns are always written (raw passthrough when toggle was off),
+  // so downstream consumers see a stable schema.
+  const calibrationCols = hasCalibration
+    ? ['fc_raw','auc_raw','fc_calibrated','auc_calibrated',
+       'fc_calibration_delta','auc_calibration_delta','calibration_model']
+    : [];
   const cols = ['gene','protein_id','perturbation_name','perturbation_type','perturbation_unit','perturbation_id',
                 'optimizer_used','sample_name','gene_aliases','protein_aliases','direction',
                 'midpoint_value','midpoint_unit','midpoint_status','ec50_status','ec50_extrapolated',
                 'confidence_label', ...(hasPEC50 ? ['pec50'] : []), 'slope','top','bottom','r2','auc','fc_max',
+                ...calibrationCols,
                 'n_valid_points','n_control_reps','control_replicate_labels','replicate_counts_by_level','replicate_labels_by_level',
                 'control_mean','treatment_means_by_level','normalized_response_by_level'];
   const data = S.filteredRows.length ? S.filteredRows : S.results;
@@ -2959,6 +3220,16 @@ function bindEvents() {
   document.getElementById('export-btn'    ).addEventListener('click', exportCSV);
   document.getElementById('table-search'  ).addEventListener('input',  filterTable);
   document.getElementById('filter-dir'    ).addEventListener('change', filterTable);
+  // Live-update calibrated columns when the user flips the toggle after a run.
+  document.getElementById('s-mlcal'       )?.addEventListener('change', () => {
+    if (!S.analysisRan || !S.results.length) return;
+    const drugName = (document.getElementById('drug-name-input')?.value || '').trim();
+    applyMLCalibration(S.results, getSettings(), drugName);
+    filterTable();
+    if (S.selectedIdx != null && S.results[S.selectedIdx]) {
+      renderMetrics(S.results[S.selectedIdx]);
+    }
+  });
   document.getElementById('gene-select'   ).addEventListener('change', e => selectGeneByIndex(e.target.value));
   document.getElementById('prev-btn'      ).addEventListener('click', () => navigateGene(-1));
   document.getElementById('next-btn'      ).addEventListener('click', () => navigateGene(1));
